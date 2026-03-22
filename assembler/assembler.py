@@ -1,11 +1,7 @@
-#!/usr/bin/env python3
 """
-Ensamblador RV32I en dos pasadas.
-
-Ejecutar desde la raíz del proyecto:
-  python assembler/assembler.py assembler/program.asm assembler/program.hex assembler/program.bin
-O desde dentro de assembler/:
-  python assembler.py program.asm program.hex program.bin
+Ensamblador RV32I.
+    cd assembler
+    python assembler.py program.asm program.hex program.bin
 """
 
 import sys
@@ -80,6 +76,16 @@ type_u = {
     "auipc": 0b0010111,
 }
 
+type_pseudointruction = {
+    "la": 2, "li": 2, "sltz": 1, "bgtz": 1, "jr": 1,
+    "lb": 1, "nop": 1, "sgtz": 1, "bgt": 1, "jalr": 1,
+    "lh": 1, "mv": 1, "beqz": 1, "ble": 1, "ret": 1,
+    "lw": 1, "not": 1, "bnez": 1, "bgtu": 1, "call": 2,
+    "sb": 1, "neg": 1, "blez": 1, "bleu": 1, "tail": 2,
+    "sh": 1, "seqz": 1, "bgez": 1, "j": 1,
+    "sw": 1, "snez": 1, "bltz": 1, "jal": 1,
+}
+
 registers = {
     "zero": 0,  "ra": 1,  "sp": 2,  "gp": 3,  "tp": 4,
     "t0":   5,  "t1": 6,  "t2": 7,  "s0": 8,  "fp": 8,
@@ -104,7 +110,7 @@ def int_to_bin(value, bin_size):
         if value in registers:
             value = registers[value]
         else:
-            value = int(value, 0)
+            value = int(value.lstrip("x"), 0) if value.startswith("x") else int(value, 0)
 
     # Si es negativo, aplicar complemento a 2 con máscara del tamaño correcto
     if value < 0:
@@ -287,9 +293,125 @@ def type_i_env_instruction(line):
     return f"{func12_bin}{zeros}{func3_bin}{zeros}{opcode}\n"
 
 
+def type_pseudoinstruction(line):
+    parts = line.strip().split(",")
+    first = parts[0].split()
+    instruction = first[0]
+    operands = first[1:] + [p.strip() for p in parts[1:]]
+
+    def split_imm(value):
+        """Divide un inmediato de 32 bits en upper[31:12] y lower[11:0]"""
+        bin_value = int_to_bin(value, 32)
+        upper = int(bin_value[0:20], 2)
+        lower = int(bin_value[20:32], 2)
+        return upper, lower
+
+    if instruction == "la":
+        upper, lower = split_imm(operands[1])
+        line = f"auipc {operands[0]}, {upper}\naddi {operands[0]}, {operands[0]}, {lower}"
+
+    elif instruction in ("lb", "lh", "lw"):
+        upper, lower = split_imm(operands[1])
+        line = f"auipc {operands[0]}, {upper}\n{instruction} {operands[0]}, {lower}({operands[0]})"
+
+    elif instruction in ("sb", "sh", "sw"):
+        upper, lower = split_imm(operands[1])
+        line = f"auipc {operands[2]}, {upper}\n{instruction} {operands[0]}, {lower}({operands[2]})"
+
+    elif instruction == "nop":
+        line = f"addi x0, x0, 0"
+
+    elif instruction == "li":
+        imm = int(operands[1], 0)
+        if -2048 <= imm <= 2047:
+            line = f"addi {operands[0]}, x0, {operands[1]}"
+        else:
+            upper, lower = split_imm(operands[1])
+            line = f"lui {operands[0]}, {upper}\naddi {operands[0]}, {operands[0]}, {lower}"
+
+    elif instruction == "mv":
+        line = f"addi {operands[0]}, {operands[1]}, 0"
+
+    elif instruction == "not":
+        line = f"xori {operands[0]}, {operands[1]}, -1"
+
+    elif instruction == "neg":
+        line = f"sub {operands[0]}, x0, {operands[1]}"
+
+    elif instruction == "seqz":
+        line = f"sltiu {operands[0]}, {operands[1]}, 1"
+
+    elif instruction == "snez":
+        line = f"sltu {operands[0]}, x0, {operands[1]}"
+
+    elif instruction == "sltz":
+        line = f"slt {operands[0]}, {operands[1]}, x0"
+
+    elif instruction == "sgtz":
+        line = f"slt {operands[0]}, x0, {operands[1]}"
+
+    elif instruction == "beqz":
+        line = f"beq {operands[0]}, x0, {operands[1]}"
+
+    elif instruction == "bnez":
+        line = f"bne {operands[0]}, x0, {operands[1]}"
+
+    elif instruction == "blez":
+        line = f"bge x0, {operands[0]}, {operands[1]}"
+
+    elif instruction == "bgez":
+        line = f"bge {operands[0]}, x0, {operands[1]}"
+
+    elif instruction == "bltz":
+        line = f"blt {operands[0]}, x0, {operands[1]}"
+
+    elif instruction == "bgtz":
+        line = f"blt x0, {operands[0]}, {operands[1]}"
+
+    elif instruction == "bgt":
+        line = f"blt {operands[1]}, {operands[0]}, {operands[2]}"
+
+    elif instruction == "ble":
+        line = f"bge {operands[1]}, {operands[0]}, {operands[2]}"
+
+    elif instruction == "bgtu":
+        line = f"bltu {operands[1]}, {operands[0]}, {operands[2]}"
+
+    elif instruction == "bleu":
+        line = f"bgeu {operands[1]}, {operands[0]}, {operands[2]}"
+
+    elif instruction == "j":
+        line = f"jal x0, {operands[0]}"
+
+    elif instruction == "jal" and len(operands) == 1:
+        line = f"jal x1, {operands[0]}"
+
+    elif instruction == "jr":
+        line = f"jalr x0, {operands[0]}, 0"
+
+    elif instruction == "jalr" and len(operands) == 1:
+        line = f"jalr x1, {operands[0]}, 0"
+
+    elif instruction == "ret":
+        line = f"jalr x0, x1, 0"
+
+    elif instruction == "call":
+        upper, lower = split_imm(operands[0])
+        line = f"auipc x1, {upper}\njalr x1, x1, {lower}"
+
+    elif instruction == "tail":
+        upper, lower = split_imm(operands[0])
+        line = f"auipc x6, {upper}\njalr x0, x6, {lower}"
+    elif instruction in ("jal", "jalr"):
+        pass  # instrucción real, no expandir
+    else:
+        print(f"Error: pseudoinstrucción no soportada '{instruction}'", file=sys.stderr)
+    return line
+
+
 def clean_source_code(source_code, symbol_table):
     source_code_cleaned = ""
-    lc_count = 0
+    pc_count = 0
     for line in source_code:
         line = strip_comment(line)
         if not line:
@@ -297,16 +419,23 @@ def clean_source_code(source_code, symbol_table):
         if ":" in line:
             pass
         else:
-            lc = lc_count * 4
-            lc_count += 1
-            for tag, tag_lc in symbol_table.items():
-                offset = tag_lc - lc
+            pc = pc_count * 4
+            instruction = line.split()[0]
+            pc_count += pseudo_size(line)
+
+            # Reemplazar tags por offsets
+            for tag, tag_pc in symbol_table.items():
+                offset = tag_pc - pc
                 if tag in line:
-                    print(f"tag={tag} tag_lc={tag_lc} lc={lc} offset={offset}")
                     line = line.replace(tag, str(offset))
+
+            # Expandir pseudoinstrucción si no tiene formato imm(rs1)
+            if instruction in type_pseudointruction and "(" not in line:
+                line = type_pseudoinstruction(line)
+
+
             source_code_cleaned += f"{line}\n"
     return source_code_cleaned
-
 
 def second_pass(source_code, symbol_table):
     """Segunda pasada: traduce instrucciones a binario."""
@@ -342,11 +471,18 @@ def second_pass(source_code, symbol_table):
 
     return binary_program
 
+def pseudo_size(line):
+    instruction = line.split()[0]
+    if instruction == "li":
+        parts = line.strip().split(",")
+        imm = int(parts[1].strip(), 0)
+        return 1 if -2048 <= imm <= 2047 else 2
+    return type_pseudointruction.get(instruction, 1)
 
 def first_pass(source_code):
     """Primera pasada: construir tabla de símbolos."""
     symbol_table = {}
-    lc_count = 0
+    pc_count = 0
 
     for line in source_code:
         line = strip_comment(line)
@@ -354,9 +490,9 @@ def first_pass(source_code):
             continue
         if ":" in line:
             tag_name = line.replace(":", "").strip()
-            symbol_table[tag_name] = lc_count * 4
+            symbol_table[tag_name] = pc_count * 4
         else:
-            lc_count += 1
+            pc_count += pseudo_size(line)
     return symbol_table
 
 def main() -> None:
@@ -374,6 +510,10 @@ def main() -> None:
     symbol_table    = first_pass(source_code)
     binary_program  = second_pass(source_code, symbol_table)
     hex_program     = binary_to_hex(binary_program)
+    cleaned_source_code = clean_source_code(source_code, symbol_table)
+
+    with open("./program_cleaned.asm", "w", encoding="utf-8") as f:
+        f.write(cleaned_source_code)
 
     with open(hex_path, "w", encoding="utf-8") as f:
         f.write(hex_program)
