@@ -1,0 +1,11 @@
+// program.hex - Example program loaded into instruction_memory at simulation time.
+// Format: one 32-bit hex word per line (no "0x" prefix), MSB first.
+// Replace this with the output of your RV32I assembler.
+//
+// This is a minimal program: just NOPs (addi x0, x0, 0 = 0x00000013)
+// so the CPU cycles without doing anything harmful while you test fetch/decode.
+
+00000013
+00000013
+00000013
+00000013

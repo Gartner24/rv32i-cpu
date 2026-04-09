@@ -6,9 +6,9 @@ A simple assembler for RISC-V 32I, written in Python using GNU assembler syntax.
 
 ### Labels
 
-- **label:** — Etiqueta en el código fuente (source code)
-- **symbol** — Dirección en la memoria de programa (program memory)
-- **offset** — Desplazamiento en la memoria de programa (program memory)
+- **label:** - Etiqueta en el código fuente (source code)
+- **symbol** - Dirección en la memoria de programa (program memory)
+- **offset** - Desplazamiento en la memoria de programa (program memory)
 
 ### Instructions
 
@@ -43,7 +43,7 @@ A simple assembler for RISC-V 32I, written in Python using GNU assembler syntax.
 | 18 | `slti rd, rs, imm` | Set Less Than immediate |
 | 19 | `sltiu rd, rs, imm` | Set Less Than Unsigned immediate |
 
-**Type I — Load**
+**Type I - Load**
 
 | # | Instruction | Description |
 |---|-------------|-------------|
@@ -117,7 +117,7 @@ A simple assembler for RISC-V 32I, written in Python using GNU assembler syntax.
 | 11 | `sltz rd, rs` | Set if less than zero |
 | 12 | `sgtz rd, rs` | Set if greater than zero |
 
-**Branch — Zero comparisons**
+**Branch - Zero comparisons**
 
 | # | Instruction | Description |
 |---|-------------|-------------|
@@ -128,7 +128,7 @@ A simple assembler for RISC-V 32I, written in Python using GNU assembler syntax.
 | 17 | `bltz rs, offset` | Branch if less than zero |
 | 18 | `bgtz rs, offset` | Branch if greater than zero |
 
-**Branch — Register comparisons**
+**Branch - Register comparisons**
 
 | # | Instruction | Description |
 |---|-------------|-------------|
