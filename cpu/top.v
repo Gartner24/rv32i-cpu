@@ -11,12 +11,13 @@
 //                10 = ALU result
 //                11 = value of register selected by SW[7:3]
 //   SW[7:3]  : register index (x0-x31) to inspect when SW[9:8]=11
+//   SW[1]    : when SW[9:8]=11, selects half: 0=bits[15:0], 1=bits[31:16]
 //
 // Outputs:
-//   HEX5-HEX0 : lower 24 bits of selected display value (hex)
+//   HEX5-HEX0 : in reg mode HEX5:HEX4=index(dec) HEX3:HEX0=value(hex); else raw hex
 //   LEDR[0]    : step mode indicator (mirrors SW[0])
 //   LEDR[8:1]  : instruction index (pc_out[9:2])
-//   LEDR[9]    : register write activity
+//   LEDR[9]    : program done (halted)
 // =============================================================================
 module top (
     input         CLOCK_50,
@@ -27,7 +28,7 @@ module top (
 );
 
 // --- Reset (active-low KEY[0] -> active-high rst) ---
-wire rst = ~KEY[0];
+wire rst = ~KEY[0]; 
 
 // --- Step mode: 2-FF synchronizer + falling-edge detect on KEY[1] ---
 reg key1_s0, key1_s1, key1_prev;
@@ -45,6 +46,14 @@ end
 // Falling edge of KEY[1] (active-low button press) = one step
 wire step_pulse = key1_prev & ~key1_s1;
 wire en = SW[0] ? step_pulse : 1'b1;
+
+// --- Halt detection ---
+reg halted;
+wire cpu_en = en & ~halted;
+always @(posedge CLOCK_50 or posedge rst) begin
+    if (rst)                              halted <= 1'b0;
+    else if (en && instr == 32'h00000000) halted <= 1'b1;
+end
 
 // --- Datapath wires ---
 wire [31:0] pc_out;
@@ -84,7 +93,7 @@ assign pc_src = (branch & alu_zero) | jal | jalr;
 // --- CPU instances ---
 
 pc u_pc (
-    .clk(CLOCK_50), .rst(rst), .en(en),
+    .clk(CLOCK_50), .rst(rst), .en(cpu_en),
     .pc_next(pc_next), .pc_out(pc_out)
 );
 
@@ -104,7 +113,7 @@ control_unit u_ctrl (
 );
 
 register_file u_regfile (
-    .clk(CLOCK_50), .reg_write(reg_write), .en(en),
+    .clk(CLOCK_50), .reg_write(reg_write), .en(cpu_en),
     .rs1(instr[19:15]), .rs2(instr[24:20]), .rd(instr[11:7]),
     .write_data(wb_data),
     .read_data1(reg_data1), .read_data2(reg_data2),
@@ -126,22 +135,32 @@ alu u_alu (
 );
 
 data_memory u_dmem (
-    .clk(CLOCK_50), .mem_write(mem_write), .mem_read(mem_read), .en(en),
+    .clk(CLOCK_50), .mem_write(mem_write), .mem_read(mem_read), .en(cpu_en),
     .addr(alu_result), .write_data(reg_data2), .read_data(mem_data_out)
 );
 
 mux2to1 u_mux_wb  (.sel(mem_to_reg),  .a(alu_result),  .b(mem_data_out), .out(wb_data_pre));
 mux2to1 u_mux_jal (.sel(jal | jalr),  .a(wb_data_pre), .b(pc_plus4),     .out(wb_data));
 
-// --- Display mux (SW[9:8]) ---
-reg [31:0] display_value;
+// --- Display logic ---
+wire [4:0]  reg_idx  = SW[7:3];
+wire [3:0]  tens     = (reg_idx >= 5'd30) ? 4'd3 :
+                       (reg_idx >= 5'd20) ? 4'd2 :
+                       (reg_idx >= 5'd10) ? 4'd1 : 4'd0;
+wire [4:0]  tens_x10 = (tens == 4'd3) ? 5'd30 :
+                       (tens == 4'd2) ? 5'd20 :
+                       (tens == 4'd1) ? 5'd10 : 5'd0;
+wire [3:0]  ones     = reg_idx - tens_x10;
+wire [15:0] reg_half = SW[1] ? debug_reg_data[31:16] : debug_reg_data[15:0];
+
+reg [23:0] display_value;
 always @(*) begin
     case (SW[9:8])
-        2'b00:   display_value = pc_out;
-        2'b01:   display_value = instr;
-        2'b10:   display_value = alu_result;
-        2'b11:   display_value = debug_reg_data;
-        default: display_value = 32'b0;
+        2'b00:   display_value = pc_out[23:0];
+        2'b01:   display_value = instr[23:0];
+        2'b10:   display_value = alu_result[23:0];
+        2'b11:   display_value = {tens, ones, reg_half};
+        default: display_value = 24'b0;
     endcase
 end
 
@@ -155,6 +174,6 @@ hex_display h5 (.value(display_value[23:20]), .segments(HEX5));
 // --- LEDs ---
 assign LEDR[0]   = SW[0];            // step mode indicator
 assign LEDR[8:1] = pc_out[9:2];      // instruction word index (lower 8 bits)
-assign LEDR[9]   = reg_write & en;   // register write activity
+assign LEDR[9]   = halted;            // program done indicator
 
 endmodule
