@@ -11,7 +11,7 @@ module instruction_memory (
     output [31:0] instr   // instrucción de 32 bits
 );
 
-reg [31:0] mem [0:255];  // 256 palabras = 1 KB de programa
+reg [31:0] mem [0:1023]; // 1024 palabras = 4 KB de programa
 
 initial begin
     $readmemh("program.hex", mem);

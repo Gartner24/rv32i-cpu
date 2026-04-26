@@ -52,7 +52,7 @@ reg halted;
 wire cpu_en = en & ~halted;
 always @(posedge CLOCK_50 or posedge rst) begin
     if (rst)                              halted <= 1'b0;
-    else if (en && instr == 32'h00000000) halted <= 1'b1;
+    else if (en && (instr == 32'h00000000 || instr == 32'h00100073)) halted <= 1'b1;
 end
 
 // --- Datapath wires ---
@@ -72,6 +72,7 @@ wire [31:0] mem_data_out;
 wire [31:0] wb_data_pre;
 wire [31:0] wb_data;
 wire [31:0] debug_reg_data;
+wire [31:0] exit_code;
 
 // --- Control signals ---
 wire        reg_write;
@@ -117,7 +118,8 @@ register_file u_regfile (
     .rs1(instr[19:15]), .rs2(instr[24:20]), .rd(instr[11:7]),
     .write_data(wb_data),
     .read_data1(reg_data1), .read_data2(reg_data2),
-    .debug_addr(SW[7:3]), .debug_data(debug_reg_data)
+    .debug_addr(SW[7:3]), .debug_data(debug_reg_data),
+    .exit_code(exit_code)
 );
 
 imm_gen u_immgen (.instr(instr), .imm_out(imm_ext));
@@ -173,7 +175,7 @@ hex_display h5 (.value(display_value[23:20]), .segments(HEX5));
 
 // --- LEDs ---
 assign LEDR[0]   = SW[0];            // step mode indicator
-assign LEDR[8:1] = pc_out[9:2];      // instruction word index (lower 8 bits)
+assign LEDR[8:1] = halted ? exit_code[7:0] : pc_out[9:2];
 assign LEDR[9]   = halted;            // program done indicator
 
 endmodule

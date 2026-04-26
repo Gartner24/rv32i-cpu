@@ -16,7 +16,8 @@ module register_file (
     output  [31:0] read_data1,   // valor leído de rs1
     output  [31:0] read_data2,   // valor leído de rs2
     input   [4:0]  debug_addr,   // registro a inspeccionar (desde switches)
-    output  [31:0] debug_data    // valor del registro inspeccionado
+    output  [31:0] debug_data,   // valor del registro inspeccionado
+    output  [31:0] exit_code     // siempre lee x10 (a0) - codigo de salida de main
 );
 
 reg [31:0] regs [0:31];
@@ -37,5 +38,6 @@ end
 assign read_data1  = (rs1 == 5'b0) ? 32'b0 : regs[rs1];
 assign read_data2  = (rs2 == 5'b0) ? 32'b0 : regs[rs2];
 assign debug_data  = (debug_addr == 5'b0) ? 32'b0 : regs[debug_addr];
+assign exit_code   = regs[10];
 
 endmodule

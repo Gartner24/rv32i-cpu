@@ -68,8 +68,8 @@ Solo funciona cuando SW[9:8] = 11.
 | LED | Que ves |
 |-----|---------|
 | LEDR[0]   | Encendido en modo paso a paso (SW[0]=1). |
-| LEDR[8:1] | El indice de la instruccion actual en binario (PC / 4). |
-| LEDR[9]   | Se enciende cuando el programa termina. La CPU se congela y los displays quedan fijos. Para reiniciar, haz reset con KEY[0]. |
+| LEDR[8:1] | Mientras corre: indice de la instruccion actual en binario (PC / 4). Cuando termina (LEDR[9] encendido): los 8 bits bajos del valor de retorno de main (x10/a0). Todo apagado = exito (retorno 0). Encendido = retorno no-cero. |
+| LEDR[9]   | Se enciende cuando el programa termina (instruccion `ebreak` o memoria vacia). La CPU se congela y los displays quedan fijos. Para reiniciar, haz reset con KEY[0]. |
 
 ---
 
