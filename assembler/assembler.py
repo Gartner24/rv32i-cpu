@@ -97,7 +97,7 @@ registers = {
 def asm_error(msg: str, line: str = "") -> None:
     """Imprime error y termina el programa."""
     if line:
-        print(f"Error: {msg}\n  → '{line.strip()}'", file=sys.stderr)
+        print(f"Error: {msg}\n  -> '{line.strip()}'", file=sys.stderr)
     else:
         print(f"Error: {msg}", file=sys.stderr)
     sys.exit(1)
