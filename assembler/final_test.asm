@@ -962,3 +962,58 @@ copiar:
         lw      s0,40(sp)
         addi    sp,sp,48
         jr      ra
+main:
+        addi    sp,sp,-16
+        sw      ra,12(sp)
+        sw      s0,8(sp)
+        addi    s0,sp,16
+        li      a1,7
+        li      a0,6
+        call    multiplicar
+        mv      a4,a0
+        li      a5,42
+        beq     a4,a5,.L121
+        li      a5,-1
+        j       .L122
+.L121:
+        li      a0,-15
+        call    valor_absoluto
+        mv      a4,a0
+        li      a5,15
+        beq     a4,a5,.L123
+        li      a5,-2
+        j       .L122
+.L123:
+        li      a1,25
+        li      a0,10
+        call    maximo
+        mv      a4,a0
+        li      a5,25
+        beq     a4,a5,.L124
+        li      a5,-3
+        j       .L122
+.L124:
+        li      a0,10
+        call    fibonacci
+        mv      a4,a0
+        li      a5,55
+        beq     a4,a5,.L125
+        li      a5,-4
+        j       .L122
+.L125:
+        li      a1,18
+        li      a0,48
+        call    mcd
+        mv      a4,a0
+        li      a5,6
+        beq     a4,a5,.L126
+        li      a5,-5
+        j       .L122
+.L126:
+        li      a5,0
+.L122:
+        mv      a0,a5
+        lw      ra,12(sp)
+        lw      s0,8(sp)
+        addi    sp,sp,16
+        jr      ra

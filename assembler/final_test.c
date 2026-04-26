@@ -274,3 +274,12 @@ void copiar(int *dest, int *src) {
     }
     dest[i] = 0;
 }
+
+int main() {
+    if (multiplicar(6, 7)    != 42) return -1;
+    if (valor_absoluto(-15)  != 15) return -2;
+    if (maximo(10, 25)       != 25) return -3;
+    if (fibonacci(10)        != 55) return -4;
+    if (mcd(48, 18)          !=  6) return -5;
+    return 0;
+}

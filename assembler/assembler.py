@@ -635,8 +635,23 @@ def main() -> None:
     hex_path = sys.argv[2]
     bin_path = sys.argv[3]
 
+    crt0 = [
+        "j handle_reset\n",
+        "j handle_trap\n",
+        "handle_reset:\n",
+        "li sp, 1024\n",
+        "call main\n",
+        "ebreak\n",
+        "handle_trap:\n",
+        "li x10, 0x123\n",
+        "j handle_trap\n",
+    ]
+
     with open(asm_path, "r", encoding="utf-8") as f:
-        source_code = f.readlines()
+        user_code = f.readlines()
+
+    # El crt0 va primero, luego el programa del usuario
+    source_code = crt0 + user_code
 
     symbol_table   = first_pass(source_code)
     binary_program = second_pass(source_code, symbol_table)
