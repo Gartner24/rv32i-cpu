@@ -22,30 +22,28 @@
 
 ---
 
-### SW[9:8] - Que mostrar en los displays hexadecimales
+### SW[9:8] - Que mostrar en los displays
 
-Estos dos interruptores controlan que valor aparece en los seis displays de 7 segmentos (HEX5-HEX0).
-
-| SW[9] | SW[8] | Que ves en los displays |
-|-------|-------|------------------------|
-| 0 | 0 | **PC** - La direccion de la instruccion que se esta ejecutando. Empieza en `000000`, sube de 4 en 4 (`000004`, `000008`, ...) mientras el programa corre. Si haces reset, vuelve a `000000`. |
-| 0 | 1 | **Instruccion** - El codigo binario (en hex) de la instruccion actual. Por ejemplo, `00500093` es `addi x1, x0, 5`. Cambia cada ciclo mientras el programa avanza. |
-| 1 | 0 | **Resultado del ALU** - El resultado de la operacion aritmetica o logica de la instruccion actual. En un `add`, ves la suma; en un `lw`, ves la direccion de memoria calculada. |
-| 1 | 1 | **Valor de registro** - El contenido del registro seleccionado por SW[7:3]. Puedes ver en tiempo real como cambia un registro mientras el programa corre. |
+| SW[9] | SW[8] | Que ves |
+|-------|-------|---------|
+| 0 | 0 | **PC** - La direccion de la instruccion actual. Empieza en `000000`, sube de 4 en 4. |
+| 0 | 1 | **Instruccion** - El codigo hex de la instruccion actual. Por ejemplo, `00500093` es `addi x1, x0, 5`. |
+| 1 | 0 | **Resultado del ALU** - El resultado de la operacion actual. |
+| 1 | 1 | **Registro** - HEX5:HEX4 muestran el numero del registro en decimal, HEX3:HEX0 su valor en hex. Usa SW[1] para ver la mitad alta o baja. |
 
 ---
 
-### SW[7:3] - Que registro inspeccionar
+### SW[7:3] - Que registro ver
 
-Solo tiene efecto cuando SW[9:8] = 11 (modo registro).
+Solo funciona cuando SW[9:8] = 11.
 
-Pon SW[7:3] en binario con el numero del registro que quieres leer (del 0 al 31).
+Pon el numero del registro en binario (0 al 31).
 
 | SW[7:3] | Registro | Nota |
 |---------|----------|------|
-| 00000   | x0  | Siempre muestra `000000` (x0 es siempre cero en RISC-V) |
+| 00000   | x0  | Siempre `000000` (x0 es siempre cero) |
 | 00001   | x1  | |
-| 00010   | x2  | Convencionalmente el stack pointer |
+| 00010   | x2  | Stack pointer |
 | 00101   | x5  | |
 | ...     | ... | |
 | 11111   | x31 | |
@@ -54,29 +52,44 @@ Ejemplo: para ver x5, pon SW[7]=0, SW[6]=0, SW[5]=1, SW[4]=0, SW[3]=1.
 
 ---
 
+### SW[1] - Mitad del registro
+
+Solo funciona cuando SW[9:8] = 11.
+
+| Posicion | Que ves en HEX3:HEX0 |
+|----------|----------------------|
+| ABAJO (0) | Bits [15:0] del registro |
+| ARRIBA (1) | Bits [31:16] del registro |
+
+---
+
 ## LEDs (LEDR)
 
 | LED | Que ves |
 |-----|---------|
-| LEDR[0]   | Encendido cuando estas en modo paso a paso (SW[0]=1). Apagado en modo libre. |
-| LEDR[8:1] | Los 8 LEDs muestran en binario el indice de la instruccion actual (PC / 4). Al ejecutar la primera instruccion ves `00000001`, la segunda `00000010`, etc. Parpadean rapidamente en modo libre; en paso a paso puedes ver cada posicion claramente. |
-| LEDR[9]   | Parpadea brevemente cada vez que se escribe un registro. En modo libre parpadea tan rapido que parece encendido; en paso a paso ves exactamente cuando hay escritura. |
+| LEDR[0]   | Encendido en modo paso a paso (SW[0]=1). |
+| LEDR[8:1] | El indice de la instruccion actual en binario (PC / 4). |
+| LEDR[9]   | Se enciende cuando el programa termina. La CPU se congela y los displays quedan fijos. Para reiniciar, haz reset con KEY[0]. |
 
 ---
 
-## Displays hexadecimales (HEX5 - HEX0)
+## Displays (HEX5 - HEX0)
 
-Muestran los 24 bits bajos del valor seleccionado por SW[9:8], en hexadecimal:
+En modos PC / instruccion / ALU muestran los 24 bits bajos del valor en hex:
 
 ```
 HEX5  HEX4  HEX3  HEX2  HEX1  HEX0
-bits: [23:20][19:16][15:12][11:8][7:4][3:0]
+[23:20][19:16][15:12][11:8][7:4][3:0]
 ```
 
-Ejemplo: si el PC vale `0x000010` (instruccion 5), los displays muestran `000010`.
-Si un registro vale `0x0000000F` (el numero 15), los displays muestran `00000F` (los 24 bits bajos).
+En modo registro (SW[9:8] = 11):
 
-> Los 8 bits mas altos (bits 31:24) no se muestran. Para valores grandes, los displays solo muestran la parte baja.
+```
+HEX5  HEX4  |  HEX3  HEX2  HEX1  HEX0
+indice (dec)   valor 16 bits (hex)
+```
+
+Ejemplo: x1 = 5 con SW[1]=0 → `01 0005`.
 
 ---
 
@@ -85,8 +98,8 @@ Si un registro vale `0x0000000F` (el numero 15), los displays muestran `00000F` 
 1. Carga `program.hex` en la FPGA.
 2. Mantén presionado **KEY[0]** para hacer reset, luego sueltalo.
 3. Deja **SW[0] abajo** - la CPU corre sola.
-4. Pon **SW[9:8] = 00** para ver como el PC sube de 4 en 4 en los displays.
-5. Pon **SW[9:8] = 11** y **SW[7:3]** en el numero de un registro para ver su valor en vivo.
+4. Cuando **LEDR[9] se encienda** el programa termino.
+5. Pon **SW[9:8] = 11** y ajusta **SW[7:3]** al registro que quieras ver. Usa **SW[1]** para ver la mitad alta si el valor es mayor a 16 bits.
 
 ---
 
@@ -94,10 +107,11 @@ Si un registro vale `0x0000000F` (el numero 15), los displays muestran `00000F` 
 
 1. Mantén presionado **KEY[0]** para hacer reset.
 2. Sube **SW[0]** (modo paso a paso). LEDR[0] se enciende.
-3. Suelta **KEY[0]**. La CPU esta congelada en PC=0, los displays muestran `000000`.
+3. Suelta **KEY[0]**. La CPU esta en PC=0.
 4. Deja **SW[9:8] = 00** para ver el PC.
-5. Presiona **KEY[1]** una vez. El PC sube a `000004` y LEDR[9] parpadea si la instruccion escribe un registro.
-6. Cambia **SW[9:8]** en cada paso para inspeccionar:
-   - `01` -> que instruccion se ejecuto (codigo hex)
-   - `10` -> que calculo hizo el ALU
-   - `11` -> el valor resultante en el registro destino (ajusta SW[7:3] al numero del registro)
+5. Presiona **KEY[1]** una vez. El PC sube a `000004`.
+6. Cambia **SW[9:8]** para inspeccionar:
+   - `01` -> instruccion ejecutada
+   - `10` -> resultado del ALU
+   - `11` -> valor del registro destino (ajusta SW[7:3])
+7. Cuando **LEDR[9] se encienda**, el programa termino.
