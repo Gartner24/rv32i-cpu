@@ -44,6 +44,21 @@ always @(*) begin
             endcase
         end
 
+        // I-type arithmetic: funct3=000 is always ADD (func7 is part of immediate, not opcode)
+        2'b11: begin
+            case (func3)
+                3'b000: alu_ctrl = 4'b0000; // addi
+                3'b100: alu_ctrl = 4'b0100; // xori
+                3'b110: alu_ctrl = 4'b0011; // ori
+                3'b111: alu_ctrl = 4'b0010; // andi
+                3'b001: alu_ctrl = 4'b0101; // slli
+                3'b101: alu_ctrl = func7[5] ? 4'b0111 : 4'b0110; // srai : srli
+                3'b010: alu_ctrl = 4'b1000; // slti
+                3'b011: alu_ctrl = 4'b1001; // sltiu
+                default: alu_ctrl = 4'b0000;
+            endcase
+        end
+
         default: alu_ctrl = 4'b0000;
     endcase
 end

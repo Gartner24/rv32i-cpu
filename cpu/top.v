@@ -49,6 +49,7 @@ wire en = SW[0] ? step_pulse : 1'b1;
 
 // --- Halt detection ---
 reg halted;
+wire [31:0] instr;
 wire cpu_en = en & ~halted;
 always @(posedge CLOCK_50 or posedge rst) begin
     if (rst)                              halted <= 1'b0;
@@ -61,7 +62,6 @@ wire [31:0] pc_next;
 wire [31:0] pc_plus4;
 wire [31:0] pc_branch;
 wire [31:0] pc_jump;
-wire [31:0] instr;
 wire [31:0] imm_ext;
 wire [31:0] reg_data1;
 wire [31:0] reg_data2;

@@ -61,7 +61,7 @@ always @(*) begin
             branch     = 0;
             jal        = 0;
             jalr       = 0;
-            alu_op     = 2'b10;
+            alu_op     = 2'b11;
         end
         LOAD: begin  // Load
             reg_write  = 1;

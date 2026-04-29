@@ -42,7 +42,7 @@ initial begin
 
     //                    rw as aa mw mr m2r br jl jr  op
     opcode=7'b0110011; chk(1, 0, 0, 0, 0, 0, 0, 0, 0, 2'b10, "R-TYPE");
-    opcode=7'b0010011; chk(1, 1, 0, 0, 0, 0, 0, 0, 0, 2'b10, "I-TYPE");
+    opcode=7'b0010011; chk(1, 1, 0, 0, 0, 0, 0, 0, 0, 2'b11, "I-TYPE");
     opcode=7'b0000011; chk(1, 1, 0, 0, 1, 1, 0, 0, 0, 2'b00, "LOAD");
     opcode=7'b0100011; chk(0, 1, 0, 1, 0, 0, 0, 0, 0, 2'b00, "S-TYPE");
     opcode=7'b1100011; chk(0, 0, 0, 0, 0, 0, 1, 0, 0, 2'b01, "B-TYPE");
