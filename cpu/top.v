@@ -2,29 +2,27 @@
 // top.v - RV32I CPU Top-Level for DE1-SoC
 //
 // Controls:
-//   KEY[0]   : reset (active-low; hold to reset, release to run)
-//   KEY[1]   : manual clock step (press once = advance one instruction)
-//   SW[0]    : 0 = free run at 50 MHz, 1 = manual step mode
-//   SW[9:8]  : display mode
-//                00 = PC
-//                01 = current instruction
-//                10 = ALU result
-//                11 = value of register selected by SW[7:3]
-//   SW[7:3]  : register index (x0-x31) to inspect when SW[9:8]=11
-//   SW[1]    : when SW[9:8]=11, selects half: 0=bits[15:0], 1=bits[31:16]
+//   KEY[0]   : reset (active-low)
+//   KEY[1]   : manual clock step (one instruction per press)
+//   SW[0]    : 0 = free run, 1 = manual step mode
 //
 // Outputs:
-//   HEX5-HEX0 : in reg mode HEX5:HEX4=index(dec) HEX3:HEX0=value(hex); else raw hex
-//   LEDR[0]    : step mode indicator (mirrors SW[0])
-//   LEDR[8:1]  : instruction index (pc_out[9:2])
-//   LEDR[9]    : program done (halted)
+//   VGA      : 640x480 debug overlay (PC, INSTR, ALU, control flags, x0-x31)
+//   HEX5-HEX0: lower 24 bits of PC (hex)
+//   LEDR[0]  : step mode indicator
+//   LEDR[8:1]: exit_code[7:0] when halted, else pc_out[9:2]
+//   LEDR[9]  : halted
 // =============================================================================
 module top (
     input         CLOCK_50,
     input  [3:0]  KEY,
     input  [9:0]  SW,
     output [9:0]  LEDR,
-    output [6:0]  HEX0, HEX1, HEX2, HEX3, HEX4, HEX5
+    output [6:0]  HEX0, HEX1, HEX2, HEX3, HEX4, HEX5,
+    // VGA
+    output [7:0]  VGA_R, VGA_G, VGA_B,
+    output        VGA_HS, VGA_VS, VGA_CLK,
+    output        VGA_BLANK_N, VGA_SYNC_N
 );
 
 // --- Reset (active-low KEY[0] -> active-high rst) ---
@@ -71,8 +69,10 @@ wire [31:0] alu_result;
 wire [31:0] mem_data_out;
 wire [31:0] wb_data_pre;
 wire [31:0] wb_data;
-wire [31:0] debug_reg_data;
 wire [31:0] exit_code;
+// VGA debug port
+wire [4:0]  vga_dbg_addr;
+wire [31:0] vga_dbg_data;
 
 // --- Control signals ---
 wire        reg_write;
@@ -89,7 +89,9 @@ wire        pc_src;
 wire [1:0]  alu_op;
 wire [3:0]  alu_ctrl;
 
-assign pc_src = (branch & alu_zero) | jal | jalr;
+// funct3[0] (instr[12]) inverts the branch condition: 0=BEQ(branch==0), 1=BNE(branch!=0)
+wire branch_taken = branch & (alu_zero ^ instr[12]);
+assign pc_src = branch_taken | jal | jalr;
 
 // --- CPU instances ---
 
@@ -114,11 +116,11 @@ control_unit u_ctrl (
 );
 
 register_file u_regfile (
-    .clk(CLOCK_50), .reg_write(reg_write), .en(cpu_en),
+    .reg_write(reg_write), .en(cpu_en), .rst(rst),
     .rs1(instr[19:15]), .rs2(instr[24:20]), .rd(instr[11:7]),
     .write_data(wb_data),
     .read_data1(reg_data1), .read_data2(reg_data2),
-    .debug_addr(SW[7:3]), .debug_data(debug_reg_data),
+    .debug_addr(vga_dbg_addr), .debug_data(vga_dbg_data),
     .exit_code(exit_code)
 );
 
@@ -137,45 +139,49 @@ alu u_alu (
 );
 
 data_memory u_dmem (
-    .clk(CLOCK_50), .mem_write(mem_write), .mem_read(mem_read), .en(cpu_en),
+    .mem_write(mem_write), .mem_read(mem_read), .en(cpu_en),
     .addr(alu_result), .write_data(reg_data2), .read_data(mem_data_out)
 );
 
 mux2to1 u_mux_wb  (.sel(mem_to_reg),  .a(alu_result),  .b(mem_data_out), .out(wb_data_pre));
 mux2to1 u_mux_jal (.sel(jal | jalr),  .a(wb_data_pre), .b(pc_plus4),     .out(wb_data));
 
-// --- Display logic ---
-wire [4:0]  reg_idx  = SW[7:3];
-wire [3:0]  tens     = (reg_idx >= 5'd30) ? 4'd3 :
-                       (reg_idx >= 5'd20) ? 4'd2 :
-                       (reg_idx >= 5'd10) ? 4'd1 : 4'd0;
-wire [4:0]  tens_x10 = (tens == 4'd3) ? 5'd30 :
-                       (tens == 4'd2) ? 5'd20 :
-                       (tens == 4'd1) ? 5'd10 : 5'd0;
-wire [3:0]  ones     = reg_idx - tens_x10;
-wire [15:0] reg_half = SW[1] ? debug_reg_data[31:16] : debug_reg_data[15:0];
+// --- VGA ---
+wire [9:0] vga_x, vga_y;
+wire       vga_video_on;
 
-reg [23:0] display_value;
-always @(*) begin
-    case (SW[9:8])
-        2'b00:   display_value = pc_out[23:0];
-        2'b01:   display_value = instr[23:0];
-        2'b10:   display_value = alu_result[23:0];
-        2'b11:   display_value = {tens, ones, reg_half};
-        default: display_value = 24'b0;
-    endcase
-end
+vga_controller u_vgac (
+    .clk_50MHz(CLOCK_50), .reset(rst),
+    .video_on(vga_video_on), .hsync(VGA_HS), .vsync(VGA_VS),
+    .clk(VGA_CLK), .x(vga_x), .y(vga_y)
+);
 
-hex_display h0 (.value(display_value[3:0]),   .segments(HEX0));
-hex_display h1 (.value(display_value[7:4]),   .segments(HEX1));
-hex_display h2 (.value(display_value[11:8]),  .segments(HEX2));
-hex_display h3 (.value(display_value[15:12]), .segments(HEX3));
-hex_display h4 (.value(display_value[19:16]), .segments(HEX4));
-hex_display h5 (.value(display_value[23:20]), .segments(HEX5));
+vga_debug u_vgad (
+    .video_on(vga_video_on), .x(vga_x), .y(vga_y),
+    .pc_out(pc_out), .instr(instr), .alu_result(alu_result),
+    .imm_ext(imm_ext), .mem_data_out(mem_data_out),
+    .alu_zero(alu_zero), .halted(halted),
+    .reg_write(reg_write), .mem_read(mem_read), .mem_write(mem_write),
+    .mem_to_reg(mem_to_reg), .alu_src(alu_src),
+    .branch(branch), .jal(jal), .jalr(jalr), .pc_src(pc_src),
+    .reg_debug_addr(vga_dbg_addr), .reg_debug_data(vga_dbg_data),
+    .vga_r(VGA_R), .vga_g(VGA_G), .vga_b(VGA_B)
+);
+
+assign VGA_BLANK_N = vga_video_on;
+assign VGA_SYNC_N  = 1'b0;
+
+// --- HEX: always show lower 24 bits of PC ---
+hex_display h0 (.value(pc_out[3:0]),   .segments(HEX0));
+hex_display h1 (.value(pc_out[7:4]),   .segments(HEX1));
+hex_display h2 (.value(pc_out[11:8]),  .segments(HEX2));
+hex_display h3 (.value(pc_out[15:12]), .segments(HEX3));
+hex_display h4 (.value(pc_out[19:16]), .segments(HEX4));
+hex_display h5 (.value(pc_out[23:20]), .segments(HEX5));
 
 // --- LEDs ---
-assign LEDR[0]   = SW[0];            // step mode indicator
+assign LEDR[0]   = SW[0];
 assign LEDR[8:1] = halted ? exit_code[7:0] : pc_out[9:2];
-assign LEDR[9]   = halted;            // program done indicator
+assign LEDR[9]   = halted;
 
 endmodule

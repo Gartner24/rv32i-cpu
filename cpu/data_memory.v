@@ -7,7 +7,6 @@
 // El soporte de byte (lb/sb) y media palabra (lh/sh) se puede agregar después.
 // =============================================================================
 module data_memory (
-    input clk,
     input mem_write,   // señal de escritura desde control_unit
     input mem_read,    // señal de lectura desde control_unit
     input en,          // clock enable (0 = freeze writes)
@@ -18,16 +17,10 @@ module data_memory (
 
 reg [31:0] mem [0:255];  // 256 palabras = 1 KB de datos
 
-integer i;
-initial begin
-    for (i = 0; i < 256; i = i + 1)
-        mem[i] = 32'b0;
-end
-
-// Escritura síncrona - se ejecuta en el flanco de subida del reloj
-always @(posedge clk) begin
+// Escritura combinacional
+always @(*) begin
     if (mem_write && en)
-        mem[addr[31:2]] <= write_data;
+        mem[addr[31:2]] = write_data;
 end
 
 // Lectura combinacional - si mem_read está activo devuelve el dato, sino cero
