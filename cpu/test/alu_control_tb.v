@@ -29,9 +29,13 @@ initial begin
     alu_op=2'b00; func3=3'b000; func7=7'h00; chk(4'b0000, "op=00 ADD");
     alu_op=2'b00; func3=3'b101; func7=7'h20; chk(4'b0000, "op=00 still ADD");
 
-    // alu_op=01: SUB regardless
-    alu_op=2'b01; func3=3'b000; func7=7'h00; chk(4'b0001, "op=01 SUB");
-    alu_op=2'b01; func3=3'b111; func7=7'h00; chk(4'b0001, "op=01 SUB any func3");
+    // alu_op=01: branch - func3 selects operation
+    alu_op=2'b01; func3=3'b000; func7=7'h00; chk(4'b0001, "op=01 BEQ  SUB");
+    alu_op=2'b01; func3=3'b001; func7=7'h00; chk(4'b0001, "op=01 BNE  SUB");
+    alu_op=2'b01; func3=3'b100; func7=7'h00; chk(4'b1000, "op=01 BLT  SLT");
+    alu_op=2'b01; func3=3'b101; func7=7'h00; chk(4'b1000, "op=01 BGE  SLT");
+    alu_op=2'b01; func3=3'b110; func7=7'h00; chk(4'b1001, "op=01 BLTU SLTU");
+    alu_op=2'b01; func3=3'b111; func7=7'h00; chk(4'b1001, "op=01 BGEU SLTU");
 
     // alu_op=10: R/I decode
     alu_op=2'b10;

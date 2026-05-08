@@ -49,6 +49,8 @@ wire en = SW[0] ? step_pulse : 1'b1;
 reg halted;
 wire [31:0] instr;
 wire cpu_en = en & ~halted;
+// tick is the edge signal for regfile/dmem: posedge fires once per CLOCK_50 tick (auto) or step_pulse (step)
+wire tick = (SW[0] ? step_pulse : CLOCK_50) & ~halted;
 always @(posedge CLOCK_50 or posedge rst) begin
     if (rst)                              halted <= 1'b0;
     else if (en && (instr == 32'h00000000 || instr == 32'h00100073)) halted <= 1'b1;
@@ -89,8 +91,20 @@ wire        pc_src;
 wire [1:0]  alu_op;
 wire [3:0]  alu_ctrl;
 
-// funct3[0] (instr[12]) inverts the branch condition: 0=BEQ(branch==0), 1=BNE(branch!=0)
-wire branch_taken = branch & (alu_zero ^ instr[12]);
+// Branch condition depends on funct3
+reg branch_cond;
+always @(*) begin
+    case (instr[14:12])
+        3'b000: branch_cond =  alu_zero;        // BEQ
+        3'b001: branch_cond = ~alu_zero;        // BNE
+        3'b100: branch_cond =  alu_result[0];   // BLT  (SLT result)
+        3'b101: branch_cond = ~alu_result[0];   // BGE
+        3'b110: branch_cond =  alu_result[0];   // BLTU (SLTU result)
+        3'b111: branch_cond = ~alu_result[0];   // BGEU
+        default: branch_cond = 1'b0;
+    endcase
+end
+wire branch_taken = branch & branch_cond;
 assign pc_src = branch_taken | jal | jalr;
 
 // --- CPU instances ---
@@ -116,7 +130,7 @@ control_unit u_ctrl (
 );
 
 register_file u_regfile (
-    .reg_write(reg_write), .en(cpu_en), .rst(rst),
+    .reg_write(reg_write), .en(tick), .rst(rst),
     .rs1(instr[19:15]), .rs2(instr[24:20]), .rd(instr[11:7]),
     .write_data(wb_data),
     .read_data1(reg_data1), .read_data2(reg_data2),
@@ -139,7 +153,7 @@ alu u_alu (
 );
 
 data_memory u_dmem (
-    .mem_write(mem_write), .mem_read(mem_read), .en(cpu_en),
+    .mem_write(mem_write), .mem_read(mem_read), .en(tick),
     .addr(alu_result), .write_data(reg_data2), .read_data(mem_data_out)
 );
 

@@ -17,10 +17,10 @@ module data_memory (
 
 reg [31:0] mem [0:255];  // 256 palabras = 1 KB de datos
 
-// Escritura combinacional
-always @(*) begin
-    if (mem_write && en)
-        mem[addr[31:2]] = write_data;
+// Escritura en flanco de subida de en (un tick = una escritura)
+always @(posedge en) begin
+    if (mem_write)
+        mem[addr[31:2]] <= write_data;
 end
 
 // Lectura combinacional - si mem_read está activo devuelve el dato, sino cero

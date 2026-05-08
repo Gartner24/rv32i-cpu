@@ -29,7 +29,12 @@ module alu_control (
 always @(*) begin
     case (alu_op)
         2'b00: alu_ctrl = 4'b0000; // ADD fijo - loads y stores solo necesitan sumar base + offset
-        2'b01: alu_ctrl = 4'b0001; // SUB fijo - branches comparan restando rs1 - rs2
+        2'b01: case (func3)
+            3'b000, 3'b001: alu_ctrl = 4'b0001; // BEQ/BNE -> SUB
+            3'b100, 3'b101: alu_ctrl = 4'b1000; // BLT/BGE  -> SLT  (signed)
+            3'b110, 3'b111: alu_ctrl = 4'b1001; // BLTU/BGEU -> SLTU
+            default:        alu_ctrl = 4'b0001;
+        endcase
         2'b10: begin
             case (func3)
                 3'b000: alu_ctrl = func7[5] ? 4'b0001 : 4'b0000; // SUB : ADD

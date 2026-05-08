@@ -6,7 +6,9 @@
 // cada instrucción ocupa 4 bytes, se indexa el array con addr[31:2],
 // descartando los 2 bits menos significativos (equivale a dividir entre 4).
 // =============================================================================
-module instruction_memory (
+module instruction_memory #(
+    parameter HEX_FILE = "program.hex"
+) (
     input  [31:0] addr,   // dirección byte desde el PC
     output [31:0] instr   // instrucción de 32 bits
 );
@@ -14,7 +16,7 @@ module instruction_memory (
 reg [31:0] mem [0:1023]; // 1024 palabras = 4 KB de programa
 
 initial begin
-    $readmemh("program.hex", mem);
+    $readmemh(HEX_FILE, mem);
 end
 
 // Lectura combinacional: la instrucción está disponible inmediatamente

@@ -3,7 +3,7 @@ IV  := iverilog
 VVP := vvp
 
 UNIT_TESTS := adder mux2to1 alu alu_control control_unit imm_gen pc register_file data_memory hex_display
-ALL_TESTS  := $(UNIT_TESTS) top
+ALL_TESTS  := $(UNIT_TESTS) top final_test
 
 .PHONY: all $(addprefix test_,$(ALL_TESTS)) clean
 
@@ -13,6 +13,9 @@ all: $(addprefix test_,$(ALL_TESTS))
 
 waves:
 	mkdir -p waves
+
+font128.hex:
+	ln -sf ../font128.hex font128.hex
 
 # ---------- unit tests ----------
 
@@ -46,15 +49,19 @@ test_data_memory: waves data_memory_tb.v $(SRC)/data_memory.v
 test_hex_display: waves hex_display_tb.v $(SRC)/hex_display.v
 	@$(IV) -o waves/hex_display_tb.vvp hex_display_tb.v $(SRC)/hex_display.v && $(VVP) waves/hex_display_tb.vvp
 
-# ---------- integration test ----------
+# ---------- integration tests ----------
 
 TOP_SRCS := $(SRC)/mux2to1.v $(SRC)/adder.v $(SRC)/alu.v $(SRC)/imm_gen.v \
             $(SRC)/register_file.v $(SRC)/alu_control.v $(SRC)/control_unit.v \
             $(SRC)/instruction_memory.v $(SRC)/data_memory.v $(SRC)/pc.v \
-            $(SRC)/hex_display.v $(SRC)/top.v
+            $(SRC)/hex_display.v $(SRC)/clock_div.v $(SRC)/vga_controller.v \
+            $(SRC)/vga_debug.v $(SRC)/top.v
 
-test_top: waves top_tb.v program.hex $(TOP_SRCS)
+test_top: waves font128.hex top_tb.v program.hex $(TOP_SRCS)
 	@$(IV) -o waves/top_tb.vvp top_tb.v $(TOP_SRCS) && $(VVP) waves/top_tb.vvp
 
+test_final_test: waves font128.hex top_final_test_tb.v $(TOP_SRCS)
+	@$(IV) -o waves/top_final_test_tb.vvp top_final_test_tb.v $(TOP_SRCS) && $(VVP) waves/top_final_test_tb.vvp
+
 clean:
-	rm -rf waves
+	rm -rf waves font128.hex

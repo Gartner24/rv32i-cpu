@@ -23,12 +23,12 @@ module register_file (
 reg [31:0] regs [0:31];
 integer i;
 
-always @(*) begin
+always @(posedge en or posedge rst) begin
     if (rst) begin
         for (i = 0; i < 32; i = i + 1)
-            regs[i] = 32'b0;
-    end else if (reg_write && en && rd != 5'b0)
-        regs[rd] = write_data;
+            regs[i] <= 32'b0;
+    end else if (reg_write && rd != 5'b0)
+        regs[rd] <= write_data;
 end
 
 // Lectura combinacional - x0 siempre devuelve cero sin importar lo almacenado
