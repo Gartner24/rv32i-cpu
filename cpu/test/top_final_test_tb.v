@@ -3,20 +3,19 @@
 `timescale 1ns/1ps
 module top_final_test_tb;
 
-defparam dut.u_imem.HEX_FILE = "../../assembler/final_test.hex";
+defparam dut.u_imem.HEX_FILE  = "../../assembler/final_test.hex";
+defparam dut.u_imem.MEM_DEPTH = 1024;
 
 reg        CLOCK_50;
 reg  [3:0] KEY;
 reg  [9:0] SW;
 wire [9:0] LEDR;
-wire [6:0] HEX0, HEX1, HEX2, HEX3, HEX4, HEX5;
 wire [7:0] VGA_R, VGA_G, VGA_B;
 wire       VGA_HS, VGA_VS, VGA_CLK, VGA_BLANK_N, VGA_SYNC_N;
 
 top dut (
     .CLOCK_50(CLOCK_50), .KEY(KEY), .SW(SW),
-    .LEDR(LEDR), .HEX0(HEX0), .HEX1(HEX1), .HEX2(HEX2),
-    .HEX3(HEX3), .HEX4(HEX4), .HEX5(HEX5),
+    .LEDR(LEDR),
     .VGA_R(VGA_R), .VGA_G(VGA_G), .VGA_B(VGA_B),
     .VGA_HS(VGA_HS), .VGA_VS(VGA_VS), .VGA_CLK(VGA_CLK),
     .VGA_BLANK_N(VGA_BLANK_N), .VGA_SYNC_N(VGA_SYNC_N)
@@ -49,9 +48,9 @@ initial begin
         $display("FAIL: final_test did not halt within %0d cycles", cycle_count);
         errors = errors + 1;
     end else begin
-        if (dut.u_regfile.regs[10] !== 32'd0) begin
+        if (dut.regs[10] !== 32'd0) begin
             $display("FAIL: final_test x10 (exit code) expected 0 got %0d (0x%0h)",
-                     $signed(dut.u_regfile.regs[10]), dut.u_regfile.regs[10]);
+                     $signed(dut.regs[10]), dut.regs[10]);
             errors = errors + 1;
         end else begin
             $display("PASS: final_test halted in %0d cycles, x10=0", cycle_count);

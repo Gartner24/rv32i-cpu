@@ -13,7 +13,7 @@ module pc (
     output reg [31:0] pc_out    // dirección actual (va a instruction_memory)
 );
 
-always @(posedge clk) begin
+always @(posedge clk or posedge rst) begin
     if (rst)
         pc_out <= 32'h00000000;
     else if (en)

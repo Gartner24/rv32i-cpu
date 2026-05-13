@@ -3,22 +3,26 @@
 //
 // Controls:
 //   KEY[0]   : reset (active-low)
-//   KEY[1]   : manual clock step (one instruction per press)
+//   KEY[1]   : manual step (one instruction per debounced press)
 //   SW[0]    : 0 = free run, 1 = manual step mode
+//
+// All CPU flip-flops run from CLOCK_50. Step/auto/halt are clock-enables,
+// not clock muxes, so Cyclone V uses only one clock domain (no glitches).
 //
 // Outputs:
 //   VGA      : 640x480 debug overlay (PC, INSTR, ALU, control flags, x0-x31)
-//   HEX5-HEX0: lower 24 bits of PC (hex)
-//   LEDR[0]  : step mode indicator
-//   LEDR[8:1]: exit_code[7:0] when halted, else pc_out[9:2]
+//   LEDR[0]  : step mode indicator (mirrors SW[0])
 //   LEDR[9]  : halted
 // =============================================================================
-module top (
+module top #(
+    // Debounce filter: KEY[1] must be stable this many CLOCK_50 cycles.
+    // Default ~1 ms at 50 MHz. Override in testbenches (defparam dut.DEBOUNCE_LIMIT=4).
+    parameter DEBOUNCE_LIMIT = 50000
+) (
     input         CLOCK_50,
     input  [3:0]  KEY,
     input  [9:0]  SW,
     output [9:0]  LEDR,
-    output [6:0]  HEX0, HEX1, HEX2, HEX3, HEX4, HEX5,
     // VGA
     output [7:0]  VGA_R, VGA_G, VGA_B,
     output        VGA_HS, VGA_VS, VGA_CLK,
@@ -26,34 +30,52 @@ module top (
 );
 
 // --- Reset (active-low KEY[0] -> active-high rst) ---
-wire rst = ~KEY[0]; 
+wire rst = ~KEY[0];
 
-// --- Step mode: 2-FF synchronizer + falling-edge detect on KEY[1] ---
-reg key1_s0, key1_s1, key1_prev;
+// --- KEY[1] debounce + falling-edge detect ---
+// Requires KEY[1] stable for DEBOUNCE_LIMIT CLOCK_50 cycles before updating.
+// Produces one 1-cycle step_pulse per physical press regardless of bounce.
+reg        key1_sync0, key1_sync1;
+reg [15:0] key1_count;
+reg        key1_stable;
 always @(posedge CLOCK_50 or posedge rst) begin
     if (rst) begin
-        key1_s0   <= 1'b1;
-        key1_s1   <= 1'b1;
-        key1_prev <= 1'b1;
+        key1_sync0  <= 1'b1;
+        key1_sync1  <= 1'b1;
+        key1_count  <= 16'b0;
+        key1_stable <= 1'b1;
     end else begin
-        key1_s0   <= KEY[1];
-        key1_s1   <= key1_s0;
-        key1_prev <= key1_s1;
+        key1_sync0 <= KEY[1];
+        key1_sync1 <= key1_sync0;
+        if (key1_sync1 == key1_stable) begin
+            key1_count <= 16'b0;
+        end else if (key1_count == DEBOUNCE_LIMIT - 1) begin
+            key1_stable <= key1_sync1;
+            key1_count  <= 16'b0;
+        end else begin
+            key1_count <= key1_count + 1'b1;
+        end
     end
 end
-// Falling edge of KEY[1] (active-low button press) = one step
-wire step_pulse = key1_prev & ~key1_s1;
-wire en = SW[0] ? step_pulse : 1'b1;
+reg key1_stable_prev;
+always @(posedge CLOCK_50 or posedge rst) begin
+    if (rst) key1_stable_prev <= 1'b1;
+    else     key1_stable_prev <= key1_stable;
+end
+wire step_pulse = key1_stable_prev & ~key1_stable;
+
+// --- Clock enable: all CPU FFs run on CLOCK_50, gated by cpu_en ---
+// Step mode: one enable per debounced KEY[1] press.
+// Auto mode: run continuously until halted.
+reg halted;
+wire cpu_en = SW[0] ? (step_pulse && ~halted) : ~halted;
 
 // --- Halt detection ---
-reg halted;
 wire [31:0] instr;
-wire cpu_en = en & ~halted;
-// tick is the edge signal for regfile/dmem: posedge fires once per CLOCK_50 tick (auto) or step_pulse (step)
-wire tick = (SW[0] ? step_pulse : CLOCK_50) & ~halted;
 always @(posedge CLOCK_50 or posedge rst) begin
-    if (rst)                              halted <= 1'b0;
-    else if (en && (instr == 32'h00000000 || instr == 32'h00100073)) halted <= 1'b1;
+    if (rst)        halted <= 1'b0;
+    else if (cpu_en && (instr == 32'h00000000 || instr == 32'h00100073))
+                    halted <= 1'b1;
 end
 
 // --- Datapath wires ---
@@ -90,6 +112,13 @@ wire        alu_zero;
 wire        pc_src;
 wire [1:0]  alu_op;
 wire [3:0]  alu_ctrl;
+
+// --- Register and memory storage (flip-flops here so sub-modules stay clock-free) ---
+reg [31:0]  regs [0:31];
+reg [31:0]  dmem [0:255];
+wire [32*32-1:0]   regs_flat;
+wire [256*32-1:0]  dmem_flat;
+integer     ri;
 
 // Branch condition depends on funct3
 reg branch_cond;
@@ -130,11 +159,11 @@ control_unit u_ctrl (
 );
 
 register_file u_regfile (
-    .reg_write(reg_write), .en(tick), .rst(rst),
-    .rs1(instr[19:15]), .rs2(instr[24:20]), .rd(instr[11:7]),
-    .write_data(wb_data),
+    .regs_flat(regs_flat),
+    .rs1(instr[19:15]), .rs2(instr[24:20]),
+    .debug_addr(vga_dbg_addr),
     .read_data1(reg_data1), .read_data2(reg_data2),
-    .debug_addr(vga_dbg_addr), .debug_data(vga_dbg_data),
+    .debug_data(vga_dbg_data),
     .exit_code(exit_code)
 );
 
@@ -153,12 +182,42 @@ alu u_alu (
 );
 
 data_memory u_dmem (
-    .mem_write(mem_write), .mem_read(mem_read), .en(tick),
-    .addr(alu_result), .write_data(reg_data2), .read_data(mem_data_out)
+    .mem_flat(dmem_flat),
+    .mem_read(mem_read),
+    .addr(alu_result),
+    .read_data(mem_data_out)
 );
 
 mux2to1 u_mux_wb  (.sel(mem_to_reg),  .a(alu_result),  .b(mem_data_out), .out(wb_data_pre));
 mux2to1 u_mux_jal (.sel(jal | jalr),  .a(wb_data_pre), .b(pc_plus4),     .out(wb_data));
+
+// --- Clocked writes for register file and data memory ---
+always @(posedge CLOCK_50 or posedge rst) begin
+    if (rst) begin
+        for (ri = 0; ri < 32; ri = ri + 1) regs[ri] <= 32'b0;
+    end else if (cpu_en && reg_write && instr[11:7] != 5'b0) begin
+        regs[instr[11:7]] <= wb_data;
+    end
+end
+
+genvar gri;
+generate
+    for (gri = 0; gri < 32; gri = gri + 1) begin : pack_regs
+        assign regs_flat[32*gri +: 32] = regs[gri];
+    end
+endgenerate
+
+always @(posedge CLOCK_50) begin
+    if (cpu_en && mem_write)
+        dmem[alu_result[31:2]] <= reg_data2;
+end
+
+genvar gmi;
+generate
+    for (gmi = 0; gmi < 256; gmi = gmi + 1) begin : pack_dmem
+        assign dmem_flat[32*gmi +: 32] = dmem[gmi];
+    end
+endgenerate
 
 // --- VGA ---
 wire [9:0] vga_x, vga_y;
@@ -185,17 +244,9 @@ vga_debug u_vgad (
 assign VGA_BLANK_N = vga_video_on;
 assign VGA_SYNC_N  = 1'b0;
 
-// --- HEX: always show lower 24 bits of PC ---
-hex_display h0 (.value(pc_out[3:0]),   .segments(HEX0));
-hex_display h1 (.value(pc_out[7:4]),   .segments(HEX1));
-hex_display h2 (.value(pc_out[11:8]),  .segments(HEX2));
-hex_display h3 (.value(pc_out[15:12]), .segments(HEX3));
-hex_display h4 (.value(pc_out[19:16]), .segments(HEX4));
-hex_display h5 (.value(pc_out[23:20]), .segments(HEX5));
-
 // --- LEDs ---
 assign LEDR[0]   = SW[0];
-assign LEDR[8:1] = halted ? exit_code[7:0] : pc_out[9:2];
+assign LEDR[8:1] = 8'b0;
 assign LEDR[9]   = halted;
 
 endmodule

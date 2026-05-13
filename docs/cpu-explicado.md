@@ -27,14 +27,18 @@ Nosotros no hacemos eso - es mas simple, pero mas lento.
 
 ## 2. Arquitectura Harvard: dos memorias separadas
 
-Esta CPU usa **arquitectura Harvard**: tiene dos memorias completamente separadas:
+Esta CPU usa **arquitectura Harvard**. La caracteristica principal es que tiene
+dos memorias completamente separadas:
 
 - **Memoria de instrucciones** (`instruction_memory.v`): solo lectura, guarda el programa
 - **Memoria de datos** (`data_memory.v`): lectura y escritura, guarda variables y el stack
 
-En cambio, tu computadora usa **arquitectura Von Neumann**: programa y datos comparten
-la misma memoria RAM. Harvard es mas simple de implementar en FPGA y evita conflictos
-(no puedes leer una instruccion y leer un dato al mismo tiempo si es la misma memoria).
+Esto permite leer una instruccion Y leer/escribir un dato al mismo tiempo en el
+mismo ciclo, porque son buses y memorias fisicamente distintas.
+
+La alternativa es **arquitectura Von Neumann** (la que usa tu computadora): programa
+y datos comparten la misma memoria RAM. Nosotros NO usamos eso. Se menciona solo
+como comparacion para entender por que Harvard es mas simple en FPGA.
 
 ---
 
@@ -120,8 +124,10 @@ Salida:  instr[31:0]
 ```
 
 Es una memoria de solo lectura (ROM) que contiene el programa. Se carga con el
-contenido de `program.hex` al momento de sintetizar en Quartus. Tiene 1024 posiciones
-de 32 bits = 4 KB de programa.
+contenido del archivo hex indicado por el parametro `HEX_FILE` al momento de sintetizar
+en Quartus. El tamano esta definido por el parametro `MEM_DEPTH` (por defecto 256
+palabras = 1 KB de programa). Para simulaciones con programas grandes como `final_test.hex`
+se puede sobreescribir con `defparam dut.u_imem.MEM_DEPTH = 1024` en el testbench.
 
 La direccion que le llega es en bytes (como en RISC-V real), pero como cada instruccion
 son 4 bytes, se ignoran los dos bits menos significativos:
@@ -164,9 +170,10 @@ Cada senal de control abre o cierra una "compuerta" en el camino de datos:
 | `alu_op` | Pista de 2 bits para `alu_control` sobre que operacion hacer |
 
 `alu_op` no dice exactamente que operacion hacer - solo da una pista:
-- `00`: siempre ADD (para loads, stores, LUI)
+- `00`: siempre ADD (para loads, stores, LUI, AUIPC, JAL, JALR)
 - `01`: mirar func3 para elegir la comparacion correcta (para branches)
-- `10`: mirar func3 y func7 para decidir (para instrucciones R e I aritmeticas)
+- `10`: mirar func3 y func7 para decidir (para instrucciones R-type)
+- `11`: mirar solo func3, ignorar func7 (para instrucciones I-type aritmeticas: addi, xori, etc.)
 
 ### 5.4 `alu_control.v` - El segundo nivel de decodificacion
 
@@ -249,74 +256,107 @@ Ejemplo con S-type (`sw`): el inmediato esta partido en `instr[31:25]` (7 bits) 
 luego los extiende a 32. Por que partido? Para que rs2 siempre este en la misma
 posicion que en R-type, lo que simplifica el banco de registros.
 
-### 5.7 `register_file.v` - El banco de registros
+### 5.7 `register_file.v` - El banco de registros (combinacional puro)
 
 ```
-Entradas: en, rst, reg_write, rs1[4:0], rs2[4:0], rd[4:0],
-          write_data[31:0], debug_addr[4:0]
+Entradas: regs_flat[1023:0], rs1[4:0], rs2[4:0], debug_addr[4:0]
 Salidas:  read_data1[31:0], read_data2[31:0], debug_data[31:0], exit_code[31:0]
 ```
 
-Son los 32 registros x0-x31. Tiene:
-- **2 puertos de lectura combinacionales**: `rs1` y `rs2` - entran las direcciones
-  del primer y segundo registro fuente, salen sus valores inmediatamente
-- **1 puerto de escritura sincrono**: en el flanco de `en`, si `reg_write = 1`,
-  escribe `write_data` en el registro `rd`
-- **Puerto de debug**: `debug_addr` / `debug_data` - usado por `vga_debug.v`
-  para leer y mostrar en pantalla todos los registros sin interferir con la ejecucion
-- **`exit_code`**: siempre lee x10 (a0), conectado a los LEDs cuando el programa termina
+Este modulo **no tiene clk, no tiene escritura, no tiene estado propio**. Es un
+decodificador (mux) puro: recibe los 32 registros ya calculados desde `top.v` y
+selecciona los que pide la instruccion actual.
 
-**No hay un puerto `clk` separado.** El trigger de escritura es directamente el flanco
-de subida de `en`:
+Los valores de los registros no viven aqui. Vienen de `top.v` empaquetados en un
+bus de 1024 bits llamado `regs_flat` (32 registros x 32 bits = 1024 bits en un wire).
+
+Internamente el modulo los desempaqueta con un bloque `generate`:
 
 ```verilog
-always @(posedge en or posedge rst) begin
-    if (rst) ...
-    else if (reg_write && rd != 5'b0)
-        regs[rd] <= write_data;
-end
+wire [31:0] regs [0:31];
+genvar gi;
+generate
+    for (gi = 0; gi < 32; gi = gi + 1) begin : unpack
+        assign regs[gi] = regs_flat[32*gi +: 32];
+    end
+endgenerate
 ```
 
-Pensar en `en` como un autoclicker: en modo paso a paso, `en` recibe `step_pulse`
-(un pulso de un ciclo cuando presionas KEY[1]) - cada press escribe un valor.
-En modo automatico, `en` recibe directamente CLOCK_50 (el reloj de 50 MHz) - escribe
-en cada flanco igual que si el reloj fuera el trigger. El resultado es el mismo desde
-el punto de vista del banco de registros.
+El `generate` se expande en tiempo de elaboracion (antes de que corra la simulacion)
+produciendo 32 `assign` fijos:
+- `assign regs[0]  = regs_flat[31:0]`
+- `assign regs[1]  = regs_flat[63:32]`
+- ...
+- `assign regs[31] = regs_flat[1023:992]`
 
-La proteccion de x0 esta en la escritura: `rd != 5'b0` bloquea cualquier intento de
-escribir en x0. La lectura devuelve 0 incondicionalmente para la direccion 0.
+Luego tres lecturas combinacionales independientes:
 
-Por que escritura sincrona y lectura asincrona? Porque en un monociclo necesitas
-leer los valores del registro en el mismo ciclo en que llegas aqui, sin esperar
-al siguiente flanco. Pero la escritura debe pasar al final del ciclo, cuando ya
-tienes el resultado calculado - de ahi que sea sincrona.
+```verilog
+assign read_data1 = (rs1 == 5'b0) ? 32'b0 : regs[rs1];
+assign read_data2 = (rs2 == 5'b0) ? 32'b0 : regs[rs2];
+assign debug_data = (debug_addr == 5'b0) ? 32'b0 : regs[debug_addr];
+assign exit_code  = regs[10];
+```
 
-### 5.8 `data_memory.v` - La RAM de datos
+La proteccion de x0 esta en la lectura: si la direccion es 0, el resultado es
+siempre 0 sin importar que diga `regs[0]`. La escritura en x0 se bloquea en `top.v`.
+
+**Por que no tiene clk?** El teacher requiere que solo `pc.v` sea sincrono para que el
+diseno sea considerado monociclo. Si este modulo tuviera `posedge clk` interno, dejaria
+de ser un bloque combinacional del camino de datos. Los flip-flops de almacenamiento
+viven en `top.v` (ver seccion 6.5), donde ya hay permiso para logica sincrona.
+
+El **puerto `debug_addr`/`debug_data`** lo maneja `vga_debug.v`: conduce `debug_addr`
+con el numero del registro que quiere mostrar en pantalla y lee `debug_data` para
+dibujarlo. Como todo es combinacional, puede recorrer los 32 registros ciclo a ciclo
+sin afectar la ejecucion.
+
+**`exit_code`** siempre lee x10 (a0), que es donde C guarda el valor de retorno de
+`main()`. El display VGA lo muestra cuando el programa termina.
+
+### 5.8 `data_memory.v` - La RAM de datos (combinacional pura)
 
 ```
-Entradas: en, mem_write, mem_read, addr[31:0], write_data[31:0]
+Entradas: mem_flat[8191:0], mem_read, addr[31:0]
 Salida:   read_data[31:0]
 ```
 
-256 palabras de 32 bits = 1 KB de datos. Aqui viven las variables y el stack.
+256 palabras de 32 bits = 1 KB de datos. Aqui viven las variables del programa y el stack.
+Al igual que `register_file.v`, **no tiene clk, no escribe nada, no tiene estado propio**.
 
-**No hay un puerto `clk` separado.** Igual que el banco de registros, el trigger de
-escritura es el flanco de subida de `en`:
+Los valores de la memoria no viven aqui. Vienen de `top.v` empaquetados en un bus de
+8192 bits llamado `mem_flat` (256 palabras x 32 bits = 8192 bits en un wire).
+
+Mismo patron de desempaquetado con `generate`:
 
 ```verilog
-always @(posedge en) begin
-    if (mem_write)
-        mem[addr[31:2]] <= write_data;
-end
+wire [31:0] mem [0:255];
+genvar gi;
+generate
+    for (gi = 0; gi < 256; gi = gi + 1) begin : unpack
+        assign mem[gi] = mem_flat[32*gi +: 32];
+    end
+endgenerate
 ```
 
-- Escritura sincrona: en el flanco de `en`, si `mem_write = 1`
-- Lectura combinacional: si `mem_read = 1`, `read_data = mem[addr[31:2]]`;
-  si `mem_read = 0`, `read_data = 0` (no contaminamos el bus con basura)
+Luego la lectura combinacional:
+
+```verilog
+assign read_data = mem_read ? mem[addr[31:2]] : 32'b0;
+```
+
+- `mem_read = 1`: devuelve la palabra en `mem[addr/4]`
+- `mem_read = 0`: devuelve 0 para no contaminar el bus de writeback con basura
+
+`addr[31:2]` convierte la direccion en bytes a indice de palabra dividiendo por 4.
+Si `addr = 8`, `8/4 = 2`, lee `mem[2]`. Solo soporta acceso alineado de 32 bits (lw/sw).
 
 El stack crece hacia abajo desde la direccion 1024 (el tope de la memoria).
 La primera instruccion del crt0 pone `sp = 1024`. Cada funcion baja el sp
 con `addi sp, sp, -N` para reservar espacio en el stack frame.
+
+Las escrituras (instruccion `sw`) las realiza `top.v` directamente sobre el arreglo
+`dmem[]` con un `always @(posedge CLOCK_50)`. Ver seccion 6.5.
 
 ### 5.9 `adder.v` - Sumador puro
 
@@ -455,84 +495,160 @@ KEY[0] es activo en bajo (cuando lo presionas va a 0). Para convertirlo a
 activo en alto (que es lo que esperan los modulos internos), se invierte con `~`.
 Resultado: mientras mantienes KEY[0] presionado, `rst = 1` y toda la CPU esta en reset.
 
-### 6.2 El modo paso a paso
+### 6.2 El modo paso a paso y el debouncer
 
-```verilog
-reg key1_s0, key1_s1, key1_prev;
-always @(posedge CLOCK_50 or posedge rst) begin
-    key1_s0   <= KEY[1];
-    key1_s1   <= key1_s0;
-    key1_prev <= key1_s1;
-end
-wire step_pulse = key1_prev & ~key1_s1;
-wire en = SW[0] ? step_pulse : 1'b1;
-wire tick = (SW[0] ? step_pulse : CLOCK_50) & ~halted;
+#### Por que existe el debouncer
+
+Cuando presionas un boton fisico, los contactos metalicos dentro no se tocan de una
+vez. Rebotan mecanicamente durante 5-20 ms antes de asentarse:
+
+```
+Lo que quieres:    1111100000000000000
+Lo que pasa real:  1111101010100000000
+                        ^^^rebote^^^
 ```
 
-Por que tres registros para un boton? Por **sincronizacion y deteccion de flanco**.
+La FPGA corre a 50 millones de ciclos por segundo. Para ti es un solo press.
+Para la FPGA, cada rebote es un press separado. Sin proteccion, un toque del boton
+avanzaria 5-10 instrucciones en vez de una.
 
-**Sincronizacion (key1_s0, key1_s1):** Las senales que vienen de fuera del chip
-(botones, switches) pueden cambiar en cualquier momento, incluso en medio de un
-flanco de reloj. Esto puede poner los flip-flops internos en un estado indefinido
-(ni 0 ni 1 - metaestabilidad). La solucion es pasar la senal por dos flip-flops
-sincronos antes de usarla. Si el primero entra en metaestabilidad, tiene un ciclo
-completo para resolverse antes de que el segundo lo lea. A este patron de dos FF
-se le llama sincronizador de dos etapas.
+**Esto explica los bugs que se veian en modo paso a paso:** instrucciones que parecian
+saltarse, registros con valores que no correspondian a la instruccion mostrada, y
+comportamiento inconsistente entre un press y el siguiente. La CPU estaba correcta.
+El problema era que el boton le mentia a la FPGA diciendo que fue presionado varias
+veces cuando en realidad fue una. Y como el rebote mecanico no es deterministico
+(a veces rebota 2 veces, a veces 7), el bug era diferente cada vez.
 
-**Deteccion de flanco (key1_prev):** `step_pulse = key1_prev & ~key1_s1` es 1 solo
-cuando `key1_prev = 1` (antes era alto) y `key1_s1 = 0` (ahora es bajo). Eso es
-exactamente un flanco de bajada - el momento en que presionas el boton. Dura
-exactamente un ciclo de reloj, lo que hace avanzar la CPU exactamente un paso.
+#### Que es un Flip-Flop (FF)
 
-`en = SW[0] ? step_pulse : 1'b1`:
-- SW[0] = 0 (libre): `en` siempre vale 1 - la CPU corre a 50 MHz
-- SW[0] = 1 (paso a paso): `en` solo vale 1 el ciclo en que presionas KEY[1]
+Antes de explicar la solucion, hay que entender el elemento basico que se usa:
 
-**Por que existe `tick`?**
+Un FF tiene una sola regla: **en cada flanco de reloj, copia su entrada a su salida.
+Entre flancos, se queda quieto sin importar que pase en la entrada.**
 
-El banco de registros y la memoria de datos usan `always @(posedge en)` - necesitan
-un **flanco** para disparar la escritura. En modo automatico, `en = 1'b1` es un nivel
-constante: nunca cambia, nunca produce flancos, y por lo tanto nunca se escribiria nada.
+```
+entrada:  0000011111100000
+reloj:        ^       ^
+salida:   0000001111110000
+               ^copia  ^copia
+```
 
-`tick` resuelve esto:
-- En modo paso a paso (SW[0]=1): `tick = step_pulse & ~halted`. Igual que `en`, ya
-  es un pulso (un flanco de subida real), asi que funciona directo.
-- En modo automatico (SW[0]=0): `tick = CLOCK_50 & ~halted`. En lugar del nivel
-  constante `en=1`, le pasamos directamente el reloj de 50 MHz. Cada flanco de
-  CLOCK_50 es un flanco de `tick`, y el banco de registros y la memoria de datos
-  escriben en cada ciclo igual que en una implementacion sincrona normal.
+Es como una camara que solo toma foto en momentos exactos, no un video continuo.
 
-`pc.v` no necesita `tick` porque usa `always @(posedge CLOCK_50)` con `cpu_en` como
-puerta logica - tiene su propio reloj y solo necesita que cpu_en sea nivel alto.
+#### Problema 1 - Metaestabilidad (por que hay 2 FF al inicio)
+
+Las senales que vienen de afuera del chip (botones, switches) pueden cambiar en
+cualquier momento, incluso justo en el momento en que el reloj sube. Cuando eso
+pasa, el FF interno no sabe si leer 0 o 1 y se queda en un estado intermedio
+(ni 0 ni 1) por un momento. Esto se llama **metaestabilidad** y puede corromper
+todo el sistema.
+
+La solucion es poner dos FF en cadena:
+
+```verilog
+key1_sync0 <= KEY[1];      // FF1: puede entrar en metaestabilidad
+key1_sync1 <= key1_sync0;  // FF2: lee FF1 un ciclo despues
+```
+
+Si FF1 entra en metaestabilidad, tiene un ciclo entero (20 nanosegundos) para
+resolverse antes de que FF2 lo lea. La probabilidad de que siga inestable es
+astronomicamente baja. `key1_sync1` sale limpia y estable, pero todavia con rebote.
+
+#### Problema 2 - Rebote (el contador de estabilidad)
+
+La solucion es simple: **solo acepto que el boton cambio si lleva mucho tiempo
+siendo diferente.**
+
+```verilog
+if (key1_sync1 == key1_stable)
+    key1_count <= 0;                // sigue igual, nada que hacer
+
+else if (key1_count == DEBOUNCE_LIMIT - 1)
+    key1_stable <= key1_sync1;      // lleva 1ms siendo diferente, acepto el cambio
+
+else
+    key1_count <= key1_count + 1;   // va camino al limite
+```
+
+- Si la senal rebota antes de llegar a 50000: el contador se resetea a cero y empieza de nuevo
+- Si llega a 50000 sin rebotar (1ms estable): acepta el nuevo valor como real
+
+```
+key1_sync1:  111111010101000000000000000000
+key1_count:  000000012012000001234...50000
+                    ^rebotes^  ^press real^
+key1_stable: 111111111111111111111111111110
+                                          ^acepta aqui
+```
+
+Con `DEBOUNCE_LIMIT = 50000` a 50 MHz son exactamente **1 ms de estabilidad
+requerida**. El rebote mecanico dura menos que eso, asi que se filtra completamente.
+
+#### Deteccion del momento exacto del press
+
+`key1_stable` ahora cambia limpiamente cuando el boton se acepta. Pero necesitamos
+saber exactamente el ciclo en que cambio para generar un pulso de UN solo ciclo.
+
+Se agrega un FF que guarda el valor anterior de `key1_stable`:
+
+```verilog
+key1_stable_prev <= key1_stable;   // siempre un ciclo atras
+
+wire step_pulse = key1_stable_prev & ~key1_stable;
+```
+
+Vale 1 solo cuando `key1_stable` paso de 1 a 0 (el ciclo exacto del press).
+El siguiente ciclo `key1_stable_prev` ya vale 0 y el pulso desaparece:
+
+```
+key1_stable:      111111110000000000
+key1_stable_prev: 111111111000000000
+step_pulse:       000000001000000000
+                           ^un solo ciclo
+```
+
+Un press fisico con todo su rebote produce exactamente **un pulso de un ciclo**.
+
+#### cpu_en: el enable general de la CPU
+
+```verilog
+wire cpu_en = SW[0] ? step_pulse : ~halted;
+```
+
+- `SW[0] = 0` (libre): `cpu_en = ~halted` - siempre 1 hasta que el programa termina
+- `SW[0] = 1` (paso a paso): `cpu_en = step_pulse` - un pulso de un ciclo por press
+
+Todos los `always @(posedge CLOCK_50)` en `top.v` (PC, registros, memoria de datos)
+tienen la condicion `if (cpu_en)`. El reloj siempre corre a 50 MHz, pero la CPU solo
+avanza cuando `cpu_en` es 1. Esto es **clock enable**: un patron estandar en FPGA que
+evita crear multiples dominios de reloj (ver seccion 11 para la explicacion completa).
 
 ### 6.3 La deteccion de halt
 
 ```verilog
 reg halted;
-wire cpu_en = en & ~halted;
-
 always @(posedge CLOCK_50 or posedge rst) begin
-    if (rst)
-        halted <= 1'b0;
-    else if (en && (instr == 32'h00000000 || instr == 32'h00100073))
-        halted <= 1'b1;
+    if (rst)        halted <= 1'b0;
+    else if (cpu_en && (instr == 32'h00000000 || instr == 32'h00100073))
+                    halted <= 1'b1;
 end
 ```
 
-`0x00000000` es una instruccion nula (zona de memoria no inicializada - el programa
-termino y no hay mas instrucciones). `0x00100073` es `ebreak` - la instruccion que
-el crt0 ejecuta despues de que `main()` retorna.
+`0x00000000` es una instruccion nula: zona de memoria no inicializada que se lee cuando
+el programa termino y no hay mas instrucciones. `0x00100073` es `ebreak`, la instruccion
+que el crt0 ejecuta despues de que `main()` retorna para senalizar fin de programa.
 
-Cuando se detecta cualquiera de las dos, `halted` se pone a 1 y ya no baja hasta
-el siguiente reset. `cpu_en = en & ~halted` congela el PC: aunque `en` siga siendo 1
-(en modo libre), el PC no avanza. `tick` tambien lleva el `~halted` para que el banco
-de registros y la memoria de datos tampoco procesen mas escrituras.
+Cuando se detecta cualquiera de las dos, `halted` se pone a 1 y no baja hasta el
+siguiente reset. Como `cpu_en = SW[0] ? step_pulse : ~halted`, en modo libre `cpu_en`
+pasa a 0 inmediatamente, congelando el PC y bloqueando todas las escrituras. En modo
+paso a paso deja de importar porque el usuario no puede avanzar mas (LEDR[9] indica halt).
 
-Por que `halted` es un registro y no combinacional? Porque si fuera combinacional,
-en el mismo ciclo en que se detecta el ebreak, `cpu_en` se pondria a 0 y el PC
-no avanzaria, pero en el siguiente ciclo seguiria viendo el mismo ebreak y
-nunca saldria del estado. Al ser registro, `halted` se pone a 1 en el flanco
-del ciclo en que se detecta, y desde ese ciclo en adelante `cpu_en = 0` de forma estable.
+**Por que `halted` es un registro y no logica combinacional?** Porque si fuera
+combinacional, en el mismo ciclo en que se detecta el ebreak `cpu_en` se pondria a 0,
+el PC no avanzaria, el siguiente ciclo seguiria viendo el mismo ebreak y estaria en
+un bucle. Al ser registro, `halted` se actualiza en el flanco: durante ese ciclo
+`cpu_en` todavia es 1 (la instruccion se ejecuta normalmente), y a partir del
+siguiente ciclo `cpu_en = 0` de forma estable.
 
 ### 6.4 El camino del PC (como decide donde ir)
 
@@ -602,32 +718,102 @@ decisiones encadenadas:
 2. Lo anterior vs PC+4 - `jal | jalr` elige (1 para JAL/JALR, guarda la
    direccion de retorno en rd)
 
-### 6.6 El display y los LEDs
+### 6.6 Los almacenes de estado: regs[] y dmem[] en top.v
+
+`register_file.v` y `data_memory.v` no tienen estado propio. Los flip-flops que
+guardan los 32 registros y las 256 palabras de memoria de datos viven directamente
+en `top.v`:
+
+```verilog
+reg [31:0] regs [0:31];   // 32 registros x 32 bits = 1 KB de logica
+reg [31:0] dmem [0:255];  // 256 palabras x 32 bits = 8 KB de logica
+```
+
+**Escritura de registros:**
+
+```verilog
+integer ri;
+always @(posedge CLOCK_50 or posedge rst) begin
+    if (rst) begin
+        for (ri = 0; ri < 32; ri = ri + 1) regs[ri] <= 32'b0;
+    end else if (cpu_en && reg_write && instr[11:7] != 5'b0) begin
+        regs[instr[11:7]] <= wb_data;
+    end
+end
+```
+
+En cada flanco de CLOCK_50:
+- Si `rst`: todos los registros se ponen a 0
+- Si `cpu_en && reg_write && rd != x0`: escribe `wb_data` en el registro destino
+
+`instr[11:7]` son los 5 bits del campo `rd` de la instruccion actual. `wb_data` es
+el resultado final del writeback (ALU, carga de memoria o PC+4 para JAL/JALR).
+La condicion `!= 5'b0` protege x0 contra escritura.
+
+**Escritura de memoria de datos:**
+
+```verilog
+always @(posedge CLOCK_50) begin
+    if (cpu_en && mem_write)
+        dmem[alu_result[31:2]] <= reg_data2;
+end
+```
+
+Si la instruccion es `sw`: escribe `reg_data2` (el valor de rs2) en `dmem` en la
+posicion `alu_result/4` (la ALU calculo la direccion base + offset en este mismo ciclo).
+Sin reset: limpiar 256 palabras en reset seria costoso e innecesario, el programa
+inicializa el stack explicitamente.
+
+**Empaquetado hacia los modulos combinacionales:**
+
+Los modulos `register_file` y `data_memory` no pueden recibir arreglos directamente
+como puertos en Verilog-2001. La solucion es empaquetar cada arreglo en un wire plano:
+
+```verilog
+wire [32*32-1:0]   regs_flat;   // 1024 bits
+wire [256*32-1:0]  dmem_flat;   // 8192 bits
+
+genvar gri;
+generate
+    for (gri = 0; gri < 32; gri = gri + 1) begin : pack_regs
+        assign regs_flat[32*gri +: 32] = regs[gri];
+    end
+endgenerate
+
+genvar gmi;
+generate
+    for (gmi = 0; gmi < 256; gmi = gmi + 1) begin : pack_dmem
+        assign dmem_flat[32*gmi +: 32] = dmem[gmi];
+    end
+endgenerate
+```
+
+Esto produce 32 + 256 = 288 `assign` combinacionales que mantienen `regs_flat` y
+`dmem_flat` siempre sincronizados con `regs[]` y `dmem[]`. Cuando `top.v` escribe
+`regs[5] <= 42` en el flanco, en el mismo ciclo (combinacionalmente) `regs_flat[191:160]`
+pasa a valer 42, y `register_file.v` lo ve inmediatamente en sus salidas de lectura.
+
+**Por que en top.v y no en los submodulos?** Ver seccion 11 para la explicacion
+completa. En resumen: el teacher require que `register_file.v` y `data_memory.v` sean
+puramente combinacionales (sin `clk`) para que el diseno cuente como monociclo. Mover
+el almacenamiento a `top.v` satisface esa regla literalmente: los submodulos no tienen
+`clk`, y los flip-flops viven en `top.v` donde ya hay logica sincrona permitida.
+
+### 6.7 El display y los LEDs
 
 ```verilog
 assign LEDR[0]   = SW[0];
-assign LEDR[8:1] = halted ? exit_code[7:0] : pc_out[9:2];
+assign LEDR[8:1] = 8'b0;
 assign LEDR[9]   = halted;
-
-hex_display h0 (.value(pc_out[3:0]),   .segments(HEX0));
-hex_display h1 (.value(pc_out[7:4]),   .segments(HEX1));
-hex_display h2 (.value(pc_out[11:8]),  .segments(HEX2));
-hex_display h3 (.value(pc_out[15:12]), .segments(HEX3));
-hex_display h4 (.value(pc_out[19:16]), .segments(HEX4));
-hex_display h5 (.value(pc_out[23:20]), .segments(HEX5));
 ```
 
-- **HEX5-HEX0**: siempre muestran los 24 bits bajos del PC en hex. Mientras corre
-  ves el PC cambiar en tiempo real. Cuando se detiene, el PC queda congelado en el
-  ebreak.
 - **LEDR[0]**: espejo de SW[0] - encendido = modo paso a paso activo
-- **LEDR[8:1]**: dual - mientras corre muestra `pc_out[9:2]` (el indice de la
-  instruccion en binario, PC/4); cuando termina muestra `exit_code[7:0]` que es
-  x10[7:0] (el valor de retorno de main). Si el programa salio bien, todos apagados.
+- **LEDR[8:1]**: apagados (toda la informacion de estado esta en el VGA)
 - **LEDR[9]**: se enciende cuando el programa termina, nunca baja hasta reset
 
-Los switches SW[9:1] ya no controlan modos de display. Toda la informacion detallada
-(registros, senales de control, ALU, memoria) esta disponible en la pantalla VGA.
+Toda la informacion detallada (PC, instruccion, ALU, registros x0-x31, senales de
+control) se muestra en la pantalla VGA a traves de `vga_debug.v`. Los displays de
+7 segmentos (HEX0-HEX5) no se usan en esta version.
 
 ---
 
@@ -649,7 +835,7 @@ El opcode es `0010011` (I_TYPE). `control_unit` ve ese opcode y pone:
 - `alu_src = 1` (el segundo operando de la ALU es el inmediato, no rs2)
 - `alu_a_src = 0` (primer operando es rs1, no el PC)
 - `mem_write = 0`, `mem_read = 0` (no tocamos memoria)
-- `alu_op = 2'b10` (alu_control mirara func3)
+- `alu_op = 2'b11` (alu_control mirara func3, ignorando func7 que es parte del inmediato)
 
 Al mismo tiempo:
 - `imm_gen` extrae el inmediato: bits[31:20] = `000000000101` = 5, extendido a 32 bits = 32'd5
@@ -802,7 +988,315 @@ y LEDR[8:1] muestra el valor de x10 (el valor de retorno de main).
 
 ---
 
-## 11. Lo que NO hace esta CPU (y por que)
+## 11. Sincronico, asincronico y combinacional: que significa cada cosa
+
+Antes de explicar por que `register_file` y `data_memory` no tienen reloj, es
+importante aclarar estos terminos porque se confunden con frecuencia.
+
+### Los cuatro conceptos
+
+| Termino | Significado | Ejemplo en esta CPU |
+|---------|-------------|---------------------|
+| **Combinacional** | La salida depende SOLO de las entradas actuales. Sin memoria, sin reloj. | ALU, imm_gen, control_unit, register_file.v |
+| **Secuencial** | La salida depende de las entradas actuales Y del estado interno. Tiene memoria. | pc.v, los regs[] y dmem[] en top.v |
+| **Sincrono** | Los cambios de estado ocurren SOLO en el flanco de reloj (`posedge clk`) | Todo `always @(posedge CLOCK_50)` en top.v |
+| **Asincrono** | Los cambios ocurren inmediatamente cuando cambian las entradas (sin esperar reloj) | Los `assign` y `always @(*)` sin clk |
+
+Cuando el teacher dice "solo el PC es sincrono", quiere decir: el unico modulo con
+un puerto `clk` y un `always @(posedge clk)` es `pc.v`. Todos los demas modulos
+responden combinacionalmente a sus entradas sin necesitar un flanco de reloj.
+
+### La diferencia practica en esta CPU
+
+**Lectura combinacional (lo que tiene register_file y data_memory):**
+```
+addr cambia -> read_data se actualiza instantaneamente (mismo ciclo)
+```
+No hay que esperar ningun flanco. La salida siempre refleja la entrada actual.
+Esto es lo que necesita una CPU monociclo: el valor del registro o memoria tiene
+que estar disponible en el mismo ciclo en que se necesita para la ALU.
+
+**Escritura sincrona (lo que hacen los always @(posedge CLOCK_50) en top.v):**
+```
+posedge CLOCK_50 -> si cpu_en && condicion: guardar nuevo valor
+```
+El valor almacenado solo cambia en el flanco. Esto es correcto para el writeback:
+quieres que el resultado calculado en el ciclo N se guarde al FINAL de ese ciclo,
+no mientras la instruccion todavia se esta ejecutando.
+
+### Por que no usar always @(*) para escribir (el error original)
+
+La version original de `data_memory.v` y `register_file.v` usaba:
+
+```verilog
+always @(*) begin
+    if (mem_write) mem[addr] = data;  // PELIGROSO
+end
+```
+
+Esto parece correcto pero tiene dos problemas graves:
+
+**Problema 1 - Latch transparente:**
+
+Cuando Quartus sintetiza `if (enable) salida = entrada` sin un `else`, no puede
+inferir un flip-flop (porque no hay reloj). En cambio infiere un **latch transparente**.
+
+La diferencia es critica:
+
+- **Flip-flop**: solo cambia en el flanco de reloj. Entre flancos es inmune a cualquier
+  cambio en la entrada. Timing perfectamente definido.
+- **Latch transparente**: cuando `enable=1`, la salida sigue a la entrada en tiempo
+  real, como si fuera un cable directo. Cuando `enable=0`, mantiene el ultimo valor.
+
+#### Como lo reporta Quartus
+
+Quartus emite este warning textual cuando sintetiza un `always @(*)` con
+`if (enable) out = in` sin `else`:
+
+```
+Warning (10240): Verilog HDL Always Construct warning at data_memory.v(N):
+inferring latch(es) for variable "mem[X]", which holds its previous value in
+one or more paths through the always construct
+```
+
+Este warning no es informativo: es la herramienta diciendote que el circuito
+sintetizado no es lo que dibujaste en el esquema. Se puede verificar abriendo
+el RTL Viewer de Quartus: en vez de un bloque de memoria con WE (write enable),
+aparece un simbolo de latch con ENABLE. Son primitivas de silicio completamente
+distintas.
+
+Esto es mandato del estandar IEEE Std 1364-2001, seccion 9.9.1:
+
+> "If a variable is assigned in some, but not all, branches of an if statement
+> within a combinational always block, the synthesizer infers a latch to preserve
+> the previous value."
+
+Quartus no tiene opcion: si el codigo tiene esa forma, sintetiza un latch.
+No es una decision de diseno de Altera.
+
+#### La cadena de propagacion en esta CPU a 50 MHz
+
+A 50 MHz el periodo de reloj es 20 ns. Para un `sw`, la cadena combinacional
+desde el flanco de reloj anterior hasta que las senales se asientan es:
+
+```
+posedge CLK
+    -> PC sale del registro          (tiempo 0 ns)
+    -> instruction_memory devuelve instr        (~2-3 ns)
+    -> control_unit calcula mem_write=1          (~1 ns mas)  <- latch se abre aqui
+    -> imm_gen calcula el offset                 (~1-2 ns)
+    -> register_file lee rs1 (base) y rs2 (data) (~2-3 ns)
+    -> ALU suma base + offset -> alu_result       (~5-8 ns)   <- addr se asienta aqui
+    -> reg_data2 (dato a escribir) se estabiliza  (~8-10 ns)
+    -> siguiente posedge CLK                     (t = 20 ns)
+```
+
+En numeros concretos para Cyclone V a 50 MHz:
+
+| Evento                     | Tiempo desde flanco |
+|----------------------------|---------------------|
+| `mem_write` = 1            | ~4 ns               |
+| `reg_data2` estable        | ~8-10 ns            |
+| `alu_result` (addr) estable| ~12-16 ns           |
+| Siguiente flanco de reloj  | 20 ns               |
+
+**Con el flip-flop (diseno actual en `top.v`):** el flanco en t=20 ns captura
+`alu_result` y `reg_data2` cuando llevan 4-8 ns completamente estables.
+Inmunidad total a todo lo que paso antes.
+
+**Con el latch transparente (el diseno rechazado):** `mem_write=1` en t=4 ns
+abre el latch. El latch queda transparente desde t=4 ns hasta t=20 ns, es decir,
+**16 de los 20 ns del ciclo**. Durante esos 16 ns, todo lo que aparezca en
+`addr` y `data` entra directo en la memoria. Los valores transitorios de la
+ALU y del banco de registros se escriben como si fueran el valor final:
+
+```
+t (ns):    0    4         10        16       20
+           |    |         |         |        |
+CLOCK_50:  |____|_________|_________|________|^___
+mem_write: ____/ latch abierto              \____
+addr:      XXXXXXXXXXXXXXXXXXXXXXXXXXXX[corr]
+data:      XXXXXXXXXXXXXXXXX[corr]
+mem[addr]: ? ? ? ? ? ? ? ? ? ? ? ? ? ? ? ? [???]
+                                            ^flanco captura el ultimo valor visto
+```
+
+El latch no captura "el valor final" sino "el ultimo valor mientras estuvo abierto".
+Si en t=19.9 ns `addr` todavia estaba en un estado de transicion, ese es el valor
+que queda guardado en memoria.
+
+#### Por que aparece exactamente `0xFFFFFF78` en vez de `0x78`
+
+Ese patron no es aleatorio. Es evidencia forense del mecanismo especifico.
+
+En esta CPU, `alu_result` es la suma `rs1 + offset` calculada por la ALU.
+Antes de que la ALU termine de calcular, los bits de la suma se propagan de
+menos significativo a mas significativo (propagacion de carry). Durante la
+propagacion, los bits altos pueden quedar temporalmente en `1` mientras el
+carry se propaga hacia ellos.
+
+`0xFFFFFF78 = 1111 1111 1111 1111 1111 1111 0111 1000`
+
+Los bits altos `0xFFFFFF` son todos unos. Eso corresponde exactamente a un
+estado transitorio de la suma donde los bits `[31:8]` aun no resolvieron el
+carry y quedaron en `1` mientras los bits `[7:0]` ya mostraban el resultado
+correcto `0x78`. El latch capturo ese estado intermedio de la propagacion del carry.
+
+Si hubiera sido ruido electrico aleatorio, los valores serian impredecibles cada
+vez. Que los 8 bits bajos sean siempre correctos y los 24 altos sean siempre
+`0xFF` identifica el mecanismo como captura de carry intermedio: evidencia del latch,
+no de ruido.
+
+#### Por que la simulacion RTL no lo muestra
+
+El simulador RTL (ModelSim/Questa/Icarus) opera con **tiempo cero**. Cuando el
+reloj sube, todas las asignaciones se resuelven en delta-cycles sin tiempo fisico.
+No existe el concepto de "la ALU tarda 8 ns en propagar el carry". Para el
+simulador, `alu_result` pasa del valor anterior al valor nuevo instantaneamente
+en el mismo delta.
+
+Esto significa que en simulacion:
+- `mem_write` se pone en 1
+- En el mismo delta, `alu_result` ya tiene el valor final correcto
+- El latch "transparente" captura el valor correcto por construccion
+
+En hardware real, los 12-16 ns de propagacion son fisicos e inevitables.
+La simulacion funcional (RTL) es necesaria para verificar logica, pero es
+**insuficiente para detectar hazards de latch** porque no modela retardos.
+
+La herramienta que si los detecta es la **post-synthesis timing simulation**
+con el netlist real que produce Quartus y las anotaciones SDF del Place & Route.
+Ahi si aparecen los glitches porque el simulador usa los retardos reales de cada
+celda. Es una simulacion mucho mas lenta que la RTL y que la mayoria de los
+flujos de desarrollo no ejecutan en cada iteracion.
+
+#### El flip-flop como solucion
+
+El `always @(posedge CLOCK_50)` en `top.v` (linea 210) sintetiza un flip-flop
+real con una ventana de captura de ~0.5 ns alrededor del flanco (definida por
+los parametros de setup y hold de la celda en Cyclone V). En ese momento,
+`alu_result` lleva 4-8 ns completamente estable. La captura es limpia
+por construccion, independientemente de lo que haya pasado en los 16 ns anteriores.
+
+Ademas, `cpu_en` como clock-enable es el patron correcto en Cyclone V: usa el
+puerto `CE` dedicado del flip-flop en lugar de crear un segundo dominio de reloj,
+eliminando cualquier posibilidad de glitch por mux de reloj. Quartus reconoce el
+patron `if (cpu_en && condicion) reg <= valor` y lo mapea directamente al CE sin
+logica adicional en el camino critico.
+
+**Problema 2 - Bucle combinacional:**
+
+Cuando una instruccion usa el mismo registro como fuente y destino, por ejemplo:
+
+```asm
+add x1, x1, x2    # x1 = x1 + x2
+```
+
+El registro x1 se lee (para ser operando de la ALU) Y se escribe (para guardar el
+resultado) en el mismo ciclo. Con un latch, esto crea un camino combinacional directo
+de la salida de vuelta a la entrada:
+
+```
+regs[1] (salida/lectura)
+    |
+    v
+   ALU  --> resultado --> regs[1] (entrada/escritura)
+    ^                          |
+    |__________________________|
+           bucle!
+```
+
+La salida retroalimenta la entrada sin ningun elemento de memoria que rompa el ciclo.
+El circuito oscila a la velocidad maxima de propagacion de la logica, que son
+gigahercios. Desde afuera se ve como ruido electrico puro en todas las senales
+conectadas a ese registro.
+
+**Lo que se veia en la FPGA con estos bugs:**
+
+- Valores como `0xFFFFFF78` en vez de `0x78` — bits correctos mezclados con basura
+- Resultados de multiplicaciones que daban 0 en vez del producto correcto
+- Funciones que retornaban a la direccion 0 en vez de al caller (el registro `ra`
+  guardaba `0x00000000` en vez de la direccion de retorno)
+- Comportamiento diferente cada vez que se compilaba o se cambiaba algo no relacionado,
+  porque el timing de los glitches depende del ruteo interno de la FPGA que cambia
+  con cada compilacion
+
+Todo esto desaparece con flip-flops reales porque el flanco de reloj actua como
+barrera: no importa cuanto oscilen las entradas durante el ciclo, el FF solo captura
+el valor en el momento exacto del flanco, cuando ya todo se asento.
+
+### Por que no poner clk en register_file.v y data_memory.v directamente
+
+La solucion tecnica obvia es agregar `always @(posedge clk)` a esos modulos.
+Eso funciona perfectamente en hardware y fue la primera solucion que se implemento.
+El problema es que el teacher lo considera una violacion de la regla monociclo:
+si `register_file.v` tiene su propio `posedge clk`, ya no es un bloque combinacional
+sino un modulo secuencial, y el diseno deja de ser "solo el PC es sincrono".
+
+### La solucion adoptada: almacenamiento en top.v
+
+Los flip-flops se mueven a `top.v`, que ya tiene permiso para tener logica sincrona.
+Los modulos `register_file.v` y `data_memory.v` se convierten en muxes puros:
+reciben todos los valores como entradas (via `regs_flat` y `mem_flat`) y simplemente
+seleccionan cual mostrar segun la direccion pedida.
+
+```
+top.v                          register_file.v
++------------------+           +------------------+
+| regs[0..31] <--- | posedge   |                  |
+|   flip-flops     | clk       | regs_flat -----+ |
+|                  |           |                | |
+| regs_flat -----> |---------> | mux:           | |
+|   (1024 bits)    |           |  rs1 -> out1   | |
++------------------+           |  rs2 -> out2   | |
+                                +------------------+
+                                  sin clk, sin estado
+```
+
+El resultado satisface ambas restricciones:
+- **Regla del teacher**: `register_file.v` y `data_memory.v` no tienen `clk`. Son
+  puramente combinacionales. Solo `pc.v` (y `top.v`) tienen logica sincrona.
+- **Correccion en FPGA**: los flip-flops son reales (`posedge CLOCK_50`), no latches.
+  Quartus los sintetiza como registros con clock enable, sin glitches.
+
+### Clock enable: por que cpu_en va dentro del if y no como reloj
+
+Se podria intentar usar `cpu_en` directamente como reloj:
+
+```verilog
+// MAL: cpu_en como reloj
+always @(posedge cpu_en) begin
+    regs[rd] <= wb_data;
+end
+```
+
+Esto tiene los mismos problemas que el latch: `cpu_en` es una senal combinacional
+derivada de `SW[0]`, `step_pulse` y `~halted`. Tiene glitches durante su propagacion.
+Usarla como reloj crea un segundo dominio de reloj con rutas de reloj no garantizadas.
+
+La forma correcta es el **clock enable**:
+
+```verilog
+// BIEN: CLOCK_50 como reloj, cpu_en como condicion
+always @(posedge CLOCK_50) begin
+    if (cpu_en && reg_write && rd != 5'b0)
+        regs[rd] <= wb_data;
+end
+```
+
+El flip-flop siempre dispara en `posedge CLOCK_50` (reloj limpio, con routing dedicado
+en la FPGA). Pero solo actua cuando `cpu_en=1`. Quartus reconoce este patron y lo
+sintetiza usando la entrada `CE` (clock enable) dedicada de cada flip-flop en el
+Cyclone V, que es una entrada libre de timing adicional.
+
+Efecto observable: en modo paso a paso, la CPU avanza exactamente una instruccion
+por press de KEY[1], porque `cpu_en = step_pulse` dura exactamente un ciclo de
+CLOCK_50. El reloj de 50 MHz sigue corriendo, pero el flip-flop solo captura ese
+unico ciclo.
+
+---
+
+## 12. Lo que NO hace esta CPU (y por que)
 
 - **No hay pipeline**: una instruccion completa por ciclo, sin solapamiento
 - **No hay cache**: acceso directo a BRAM, latencia fija de 0 ciclos adicionales

@@ -7,13 +7,14 @@
 // descartando los 2 bits menos significativos (equivale a dividir entre 4).
 // =============================================================================
 module instruction_memory #(
-    parameter HEX_FILE = "program.hex"
+    parameter HEX_FILE  = "program.hex",
+    parameter MEM_DEPTH = 256
 ) (
     input  [31:0] addr,   // dirección byte desde el PC
     output [31:0] instr   // instrucción de 32 bits
 );
 
-reg [31:0] mem [0:1023]; // 1024 palabras = 4 KB de programa
+reg [31:0] mem [0:MEM_DEPTH-1];
 
 initial begin
     $readmemh(HEX_FILE, mem);

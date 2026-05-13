@@ -13,14 +13,16 @@ reg        CLOCK_50;
 reg  [3:0] KEY;
 reg  [9:0] SW;
 wire [9:0] LEDR;
-wire [6:0] HEX0, HEX1, HEX2, HEX3, HEX4, HEX5;
 wire [7:0] VGA_R, VGA_G, VGA_B;
 wire       VGA_HS, VGA_VS, VGA_CLK, VGA_BLANK_N, VGA_SYNC_N;
 
+// DEBOUNCE_LIMIT=1: stable transitions on cycle 2 (sync1 sees 0), cpu_en=1 on
+// cycle 3. Fits within wait_cycles(2)+wait_cycles(2) = 4 total posedges.
+defparam dut.DEBOUNCE_LIMIT = 1;
+
 top dut (
     .CLOCK_50(CLOCK_50), .KEY(KEY), .SW(SW),
-    .LEDR(LEDR), .HEX0(HEX0), .HEX1(HEX1), .HEX2(HEX2),
-    .HEX3(HEX3), .HEX4(HEX4), .HEX5(HEX5),
+    .LEDR(LEDR),
     .VGA_R(VGA_R), .VGA_G(VGA_G), .VGA_B(VGA_B),
     .VGA_HS(VGA_HS), .VGA_VS(VGA_VS), .VGA_CLK(VGA_CLK),
     .VGA_BLANK_N(VGA_BLANK_N), .VGA_SYNC_N(VGA_SYNC_N)
@@ -55,14 +57,14 @@ initial begin
     wait_cycles(8);
     #1;
 
-    if (dut.u_regfile.regs[1] !== 32'd5)
-        begin $display("FAIL: x1 expected 5 got %0d",  dut.u_regfile.regs[1]); errors = errors+1; end
-    if (dut.u_regfile.regs[2] !== 32'd10)
-        begin $display("FAIL: x2 expected 10 got %0d", dut.u_regfile.regs[2]); errors = errors+1; end
-    if (dut.u_regfile.regs[3] !== 32'd15)
-        begin $display("FAIL: x3 expected 15 got %0d", dut.u_regfile.regs[3]); errors = errors+1; end
-    if (dut.u_regfile.regs[4] !== 32'd15)
-        begin $display("FAIL: x4 expected 15 got %0d", dut.u_regfile.regs[4]); errors = errors+1; end
+    if (dut.regs[1] !== 32'd5)
+        begin $display("FAIL: x1 expected 5 got %0d",  dut.regs[1]); errors = errors+1; end
+    if (dut.regs[2] !== 32'd10)
+        begin $display("FAIL: x2 expected 10 got %0d", dut.regs[2]); errors = errors+1; end
+    if (dut.regs[3] !== 32'd15)
+        begin $display("FAIL: x3 expected 15 got %0d", dut.regs[3]); errors = errors+1; end
+    if (dut.regs[4] !== 32'd15)
+        begin $display("FAIL: x4 expected 15 got %0d", dut.regs[4]); errors = errors+1; end
 
     // LEDR[0] mirrors SW[0]
     if (LEDR[0] !== 1'b0)
