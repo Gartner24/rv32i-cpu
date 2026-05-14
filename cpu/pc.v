@@ -1,9 +1,7 @@
 // =============================================================================
-// pc.v - Contador de Programa (Program Counter)
-// Registro de 32 bits que guarda la dirección de la instrucción actual.
-// En cada flanco de subida del reloj carga el siguiente PC que viene de top.v
-// (que puede ser PC+4 o una dirección de salto).
-// Con reset activo vuelve a 0x00000000 - punto de inicio del programa.
+// pc.v - Registro de 32 bits que apunta a la instruccion en curso.
+// Cada ciclo activo (cpu_en=1) avanza a pc_next (PC+4 o direccion de salto).
+// Reset sincrono vuelve a 0x00000000.
 // =============================================================================
 module pc (
     input             clk,

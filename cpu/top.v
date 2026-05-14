@@ -1,22 +1,25 @@
 // =============================================================================
-// top.v - RV32I CPU Top-Level for DE1-SoC
+// top.v - Modulo principal de la CPU RV32I para la placa DE1-SoC.
+// Conecta todos los submodulos del datapath y contiene los flip-flops de
+// estado (registros x0-x31 y memoria de datos dmem).
 //
-// Controls:
-//   KEY[0]   : reset (active-low)
-//   KEY[1]   : manual step (one instruction per debounced press)
-//   SW[0]    : 0 = free run, 1 = manual step mode
+// Controles fisicos:
+//   KEY[0]  : reset (activo en bajo)
+//   KEY[1]  : paso manual (una instruccion por pulsacion, con anti-rebote)
+//   SW[0]   : 0 = ejecucion libre,  1 = modo paso a paso
 //
-// All CPU flip-flops run from CLOCK_50. Step/auto/halt are clock-enables,
-// not clock muxes, so Cyclone V uses only one clock domain (no glitches).
+// Todos los flip-flops corren sobre CLOCK_50. El paso, la ejecucion libre
+// y el halt se implementan como clock-enable (no como mux de reloj), por lo
+// que el diseno tiene un solo dominio de reloj sin riesgo de glitch.
 //
-// Outputs:
-//   VGA      : 640x480 debug overlay (PC, INSTR, ALU, control flags, x0-x31)
-//   LEDR[0]  : step mode indicator (mirrors SW[0])
-//   LEDR[9]  : halted
+// Salidas:
+//   VGA             : overlay de depuracion 640x480 (PC, registros, senales)
+//   LEDR[0]         : indica modo paso a paso (espeja SW[0])
+//   LEDR[9]         : CPU detenida (halt)
 // =============================================================================
 module top #(
-    // Debounce filter: KEY[1] must be stable this many CLOCK_50 cycles.
-    // Default ~1 ms at 50 MHz. Override in testbenches (defparam dut.DEBOUNCE_LIMIT=4).
+    // Anti-rebote: KEY[1] debe estar estable este numero de ciclos antes de registrar la pulsacion.
+    // Por defecto ~1 ms a 50 MHz. Los testbenches usan defparam dut.DEBOUNCE_LIMIT=4.
     parameter DEBOUNCE_LIMIT = 50000
 ) (
     input         CLOCK_50,
@@ -29,12 +32,10 @@ module top #(
     output        VGA_BLANK_N, VGA_SYNC_N
 );
 
-// --- Reset (active-low KEY[0] -> active-high rst) ---
+// --- Reset: KEY[0] activo en bajo -> rst activo en alto ---
 wire rst = ~KEY[0];
 
-// --- KEY[1] debounce + falling-edge detect ---
-// Requires KEY[1] stable for DEBOUNCE_LIMIT CLOCK_50 cycles before updating.
-// Produces one 1-cycle step_pulse per physical press regardless of bounce.
+// --- Anti-rebote KEY[1]: genera step_pulse (1 ciclo) por cada pulsacion fisica ---
 reg        key1_sync0, key1_sync1;
 reg [15:0] key1_count;
 reg        key1_stable;
@@ -64,13 +65,11 @@ always @(posedge CLOCK_50 or posedge rst) begin
 end
 wire step_pulse = key1_stable_prev & ~key1_stable;
 
-// --- Clock enable: all CPU FFs run on CLOCK_50, gated by cpu_en ---
-// Step mode: one enable per debounced KEY[1] press.
-// Auto mode: run continuously until halted.
+// --- Clock enable: modo paso = un ciclo por pulsacion, modo libre = corre hasta halt ---
 reg halted;
 wire cpu_en = SW[0] ? (step_pulse && ~halted) : ~halted;
 
-// --- Halt detection ---
+// --- Halt: se activa al ejecutar ebreak (0x00100073) o instruccion nula ---
 wire [31:0] instr;
 always @(posedge CLOCK_50 or posedge rst) begin
     if (rst)        halted <= 1'b0;
@@ -78,7 +77,7 @@ always @(posedge CLOCK_50 or posedge rst) begin
                     halted <= 1'b1;
 end
 
-// --- Datapath wires ---
+// --- Cables del datapath ---
 wire [31:0] pc_out;
 wire [31:0] pc_next;
 wire [31:0] pc_plus4;
@@ -94,11 +93,10 @@ wire [31:0] mem_data_out;
 wire [31:0] wb_data_pre;
 wire [31:0] wb_data;
 wire [31:0] exit_code;
-// VGA debug port
 wire [4:0]  vga_dbg_addr;
 wire [31:0] vga_dbg_data;
 
-// --- Control signals ---
+// --- Senales de control ---
 wire        reg_write;
 wire        alu_src;
 wire        alu_a_src;
@@ -113,14 +111,14 @@ wire        pc_src;
 wire [1:0]  alu_op;
 wire [3:0]  alu_ctrl;
 
-// --- Register and memory storage (flip-flops here so sub-modules stay clock-free) ---
+// --- Almacenamiento de estado (FF en top.v; submodulos son combinacionales) ---
 reg [31:0]  regs [0:31];
 reg [31:0]  dmem [0:255];
 wire [32*32-1:0]   regs_flat;
 wire [256*32-1:0]  dmem_flat;
 integer     ri;
 
-// Branch condition depends on funct3
+// --- Condicion de salto segun funct3 ---
 reg branch_cond;
 always @(*) begin
     case (instr[14:12])
@@ -136,17 +134,17 @@ end
 wire branch_taken = branch & branch_cond;
 assign pc_src = branch_taken | jal | jalr;
 
-// --- CPU instances ---
+// --- Instancias del datapath ---
 
 pc u_pc (
     .clk(CLOCK_50), .rst(rst), .en(cpu_en),
     .pc_next(pc_next), .pc_out(pc_out)
 );
 
-// --- Sumamos pc's
 adder u_pc_plus4  (.a(pc_out),  .b(32'd4),    .out(pc_plus4));
 adder u_pc_branch (.a(pc_out),  .b(imm_ext),  .out(pc_branch));
 
+// JALR salta a rs1+imm (resultado de ALU); JAL/branch saltan a PC+offset.
 mux2to1 u_mux_jump (.sel(jalr),   .a(pc_branch), .b(alu_result), .out(pc_jump));
 mux2to1 u_mux_pc   (.sel(pc_src), .a(pc_plus4),  .b(pc_jump),    .out(pc_next));
 
@@ -170,6 +168,7 @@ register_file u_regfile (
 
 imm_gen u_immgen (.instr(instr), .imm_out(imm_ext));
 
+// alu_a_src=1 pone PC como operando A (AUIPC/JAL); alu_src=1 pone inmediato como B.
 mux2to1 u_mux_alu_a (.sel(alu_a_src), .a(reg_data1), .b(pc_out),   .out(alu_operand_a));
 mux2to1 u_mux_alu_b (.sel(alu_src),   .a(reg_data2), .b(imm_ext),  .out(alu_operand_b));
 
@@ -189,10 +188,12 @@ data_memory u_dmem (
     .read_data(mem_data_out)
 );
 
+// Write-back: mem_to_reg elige entre resultado de ALU o dato de memoria.
 mux2to1 u_mux_wb  (.sel(mem_to_reg),  .a(alu_result),  .b(mem_data_out), .out(wb_data_pre));
+// JAL/JALR escriben PC+4 como direccion de retorno.
 mux2to1 u_mux_jal (.sel(jal | jalr),  .a(wb_data_pre), .b(pc_plus4),     .out(wb_data));
 
-// --- Clocked writes for register file and data memory ---
+// --- Escrituras sincronicas (banco de registros y memoria de datos) ---
 always @(posedge CLOCK_50 or posedge rst) begin
     if (rst) begin
         for (ri = 0; ri < 32; ri = ri + 1) regs[ri] <= 32'b0;

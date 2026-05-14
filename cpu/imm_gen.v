@@ -1,10 +1,7 @@
 // =============================================================================
-// imm_gen.v - Generador de Inmediatos
-// Extrae y extiende con signo el inmediato de la instrucción.
-// RV32I tiene 5 formatos de inmediato con bits dispersos en la instrucción.
-// Este módulo los reensambla según el tipo de instrucción (identificado por
-// el opcode). El bit de signo siempre es instr[31] en todos los formatos -
-// decisión deliberada de RISC-V para simplificar el hardware.
+// imm_gen.v - Extrae y extiende con signo el inmediato de la instruccion.
+// RV32I dispersa los bits del inmediato segun el formato (I, S, B, U, J);
+// este modulo los reensambla. El bit de signo es siempre instr[31].
 // =============================================================================
 module imm_gen (
     input      [31:0] instr,

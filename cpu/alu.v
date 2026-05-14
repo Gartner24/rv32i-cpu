@@ -1,10 +1,8 @@
 // =============================================================================
-// alu.v - Arithmetic Logic Unit
-// Performs all compute operations required by RV32I.
-// Receives a 4-bit control signal (from alu_control.v) and two 32-bit operands.
-//
-// The 'zero' flag is true when result == 0.
-// BEQ uses this: it subtracts rs2 from rs1; if result is zero, they are equal.
+// alu.v - Unidad Aritmetico-Logica RV32I
+// Realiza la operacion indicada por alu_ctrl sobre dos operandos de 32 bits.
+// La senal zero se activa cuando result == 0; la usan BEQ y BNE para decidir
+// si el salto se toma o no.
 // =============================================================================
 module alu (
     input [31:0] a,
@@ -16,16 +14,16 @@ module alu (
 
 always @(*) begin
     case (alu_ctrl)
-        4'b0000: result = a + b;  // ADD: suma a + b
-        4'b0001: result = a - b;  // SUB: resta a - b
-        4'b0100: result = a ^  b;  // XOR: XOR bit a bit
-        4'b0011: result = a | b;  // OR:  OR bit a bit
-        4'b0010: result = a & b;  // AND: AND bit a bit
-        4'b0101: result = a << b[4:0];  // SLL: shift left lógico, usa b[4:0] bits
-        4'b0110: result = a >> b[4:0];  // SRL: shift right lógico (rellena con ceros)
-        4'b0111: result = $signed(a) >>> b[4:0];  // SRA: shift right aritmético (rellena con el bit de signo)
-        4'b1000: result = $signed(a) < $signed(b) ? 32'd1 : 32'd0;  // SLT: si a < b (con signo) -> result = 1, sino 0
-        4'b1001: result = (a < b) ? 32'd1 : 32'd0;  // SLTU: igual pero sin signo
+        4'b0000: result = a + b;                                         // ADD
+        4'b0001: result = a - b;                                         // SUB
+        4'b0100: result = a ^  b;                                        // XOR
+        4'b0011: result = a | b;                                         // OR
+        4'b0010: result = a & b;                                         // AND
+        4'b0101: result = a << b[4:0];                                   // SLL
+        4'b0110: result = a >> b[4:0];                                   // SRL
+        4'b0111: result = $signed(a) >>> b[4:0];                         // SRA (extiende bit de signo)
+        4'b1000: result = $signed(a) < $signed(b) ? 32'd1 : 32'd0;      // SLT  (con signo)
+        4'b1001: result = (a < b)                 ? 32'd1 : 32'd0;      // SLTU (sin signo)
         default: result = 32'b0;
     endcase
 end

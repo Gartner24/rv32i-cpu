@@ -1,8 +1,7 @@
 // =============================================================================
-// adder.v - Sumador de 32 bits
-// Se instancia dos veces en top.v: una para calcular PC+4 y otra para
-// calcular PC+inmediato (dirección de salto). No tiene clock porque es
-// combinacional puro - la salida cambia instantáneamente con las entradas.
+// adder.v - Sumador combinacional de 32 bits.
+// Instanciado dos veces en top.v: u_pc_plus4 calcula PC+4,
+// u_pc_branch calcula PC+offset para saltos.
 // =============================================================================
 module adder (
     input [31:0] a,

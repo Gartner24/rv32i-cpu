@@ -1,14 +1,16 @@
-// VGA debug renderer for RV32I CPU.
-// Renders an 80x30 character grid (8x16 font) showing all CPU state.
-// Purely combinational: (x,y) + CPU signals -> R/G/B.
-// Register file is read through debug_addr/debug_data, driven per-cell.
+// =============================================================================
+// vga_debug.v - Muestra el estado completo de la CPU por pantalla (640x480).
+// Dibuja una grilla de 80x30 caracteres (fuente 8x16, font128.hex).
+// Completamente combinacional: dada la posicion del pixel (x,y) y las senales
+// de la CPU, produce directamente el color RGB sin estado interno.
 //
-// Screen layout (640x480, font128.hex, Atari-ST 8x16):
-//   Row 0: PC / INSTR / ALU / Z / HALT / MEM
-//   Row 1: OPC / F3 / F7 / RD / RS1 / RS2 / IMM
-//   Row 2: control unit flags
-//   Row 4: REGISTERS header
-//   Rows 5-20: x00..x15 (left) and x16..x31 (right)
+// Distribucion de filas en pantalla:
+//   Fila 0  (amarillo): PC / INSTR / ALU / ZERO / HALT / MEM
+//   Fila 1  (blanco):   OPC / F3 / F7 / RD / RS1 / RS2 / IMM
+//   Fila 2  (cyan):     senales de control (RW, MR, MW, M2R, AS, BR, JL, JR, PCS)
+//   Fila 4  (verde):    encabezado REGISTERS
+//   Filas 5-20 (blanco): x00..x15 (panel izquierdo) y x16..x31 (panel derecho)
+// =============================================================================
 
 module vga_debug (
     input         video_on,
@@ -56,20 +58,23 @@ module vga_debug (
     // ---------------------------------------------------------------
     // Helper functions
     // ---------------------------------------------------------------
-    function [6:0] hn; // hex nibble -> ASCII ('0'..'9','A'..'F')
+    // Convierte un nibble (0-15) a su caracter ASCII hexadecimal ('0'..'9', 'A'..'F').
+    function [6:0] hn;
         input [3:0] n;
         begin
             if (n < 4'd10) hn = 7'h30 + {3'b0, n};
-            else           hn = 7'h37 + {3'b0, n}; // 'A'=0x41, 0x41-10=0x37
+            else           hn = 7'h37 + {3'b0, n}; // 'A'=0x41; 0x41-10=0x37
         end
     endfunction
 
-    function [6:0] bit_ch; // 0 or 1 bit -> ASCII
+    // Convierte un bit a su caracter ASCII: 0 -> '0', 1 -> '1'.
+    function [6:0] bit_ch;
         input b;
         bit_ch = b ? 7'h31 : 7'h30;
     endfunction
 
-    function [6:0] dec_tens; // 0..31 -> tens ASCII digit
+    // Devuelve el digito de las decenas en ASCII para un numero 0..31.
+    function [6:0] dec_tens;
         input [4:0] n;
         begin
             if      (n >= 30) dec_tens = 7'h33;
@@ -79,7 +84,8 @@ module vga_debug (
         end
     endfunction
 
-    function [6:0] dec_ones; // 0..31 -> ones ASCII digit
+    // Devuelve el digito de las unidades en ASCII para un numero 0..31.
+    function [6:0] dec_ones;
         input [4:0] n;
         reg [4:0] v;
         begin

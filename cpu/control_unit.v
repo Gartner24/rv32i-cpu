@@ -1,16 +1,18 @@
 // =============================================================================
-// control_unit.v - Main Control Unit
-// Decodes the opcode field (instr[6:0]) and produces all control signals.
+// control_unit.v - Decodifica el opcode[6:0] y activa las senales de control
+// que gobiernan el datapath: que registros leer, si acceder a memoria,
+// que operacion hace la ALU, y como calcular el siguiente PC.
 //
-// RV32I opcode map:
+// Mapa de opcodes RV32I:
 //   0110011 = R-type  (add, sub, and, or ...)
 //   0010011 = I-type  (addi, andi, ori ...)
-//   0000011 = Load    (lw, lb, lh ...)
-//   0100011 = S-type  (sw, sb, sh)
-//   1100011 = B-type  (beq, bne ...)
+//   0000011 = Load    (lw)
+//   0100011 = S-type  (sw)
+//   1100011 = B-type  (beq, bne, blt, bge ...)
 //   0110111 = LUI
 //   0010111 = AUIPC
 //   1101111 = JAL
+//   1100111 = JALR
 // =============================================================================
 module control_unit (
     input  [6:0] opcode,
@@ -26,7 +28,6 @@ module control_unit (
     output reg [1:0] alu_op   // pista para alu_control
 );
 
-// Opcode constants - named parameters make the case statement readable
 localparam R_TYPE = 7'b0110011;
 localparam I_TYPE = 7'b0010011;
 localparam LOAD = 7'b0000011;

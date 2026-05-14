@@ -1,8 +1,7 @@
 // =============================================================================
-// register_file.v - Banco de Registros (combinacional puro)
-// Decodifica lecturas del arreglo regs_flat que viene de top.v.
-// Los flip-flops de escritura viven en top.v para que este modulo
-// sea puramente combinacional (sin clk), cumpliendo la regla monociclo.
+// register_file.v - Banco de 32 registros de 32 bits (x0..x31).
+// x0 siempre devuelve 0 sin importar lo que haya escrito.
+// Lecturas combinacionales; las escrituras viven en top.v con flip-flops.
 // =============================================================================
 module register_file (
     input  [32*32-1:0] regs_flat,  // 32 registros x 32 bits, empaquetados

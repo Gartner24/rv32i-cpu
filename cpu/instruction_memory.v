@@ -1,10 +1,8 @@
 // =============================================================================
-// instruction_memory.v - Memoria de Instrucciones (ROM)
-// Almacena el programa a ejecutar. Solo lectura durante la operación normal.
-// Al inicio de la simulación carga el archivo "program.hex" generado por
-// el ensamblador. La dirección es en bytes (como en RISC-V real), pero como
-// cada instrucción ocupa 4 bytes, se indexa el array con addr[31:2],
-// descartando los 2 bits menos significativos (equivale a dividir entre 4).
+// instruction_memory.v - ROM de 256 instrucciones que contiene el programa.
+// Carga program.hex al inicio de la simulacion/sintesis.
+// La direccion llega en bytes; addr[1:0] se descarta porque cada instruccion
+// ocupa 4 bytes (acceso siempre alineado a palabra).
 // =============================================================================
 module instruction_memory #(
     parameter HEX_FILE  = "program.hex",

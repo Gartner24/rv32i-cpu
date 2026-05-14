@@ -1,8 +1,7 @@
 // =============================================================================
-// data_memory.v - Memoria de Datos (combinacional pura)
-// Decodifica lecturas del arreglo mem_flat que viene de top.v.
-// Los flip-flops de escritura viven en top.v para que este modulo
-// sea puramente combinacional (sin clk), cumpliendo la regla monociclo.
+// data_memory.v - RAM de 256 palabras (1 KB) para variables y stack.
+// Recibe el arreglo de datos empaquetado desde top.v (donde viven los FF).
+// Devuelve el dato en addr de forma combinacional en el mismo ciclo.
 // =============================================================================
 module data_memory (
     input  [256*32-1:0] mem_flat,  // 256 palabras x 32 bits, empaquetadas

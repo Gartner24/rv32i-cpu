@@ -1,23 +1,13 @@
 // =============================================================================
-// alu_control.v - ALU Control
-// Takes the 2-bit alu_op hint from the main control unit plus funct3 and
-// funct7 from the instruction, and produces the 4-bit alu_ctrl signal that
-// tells the ALU exactly which operation to perform.
+// alu_control.v - Determina la operacion exacta que debe ejecutar la ALU.
+// Combina alu_op (hint de 2 bits de control_unit) con funct3 y funct7
+// de la instruccion para producir alu_ctrl de 4 bits.
+// Segundo nivel de decodificacion: control_unit solo mira el opcode;
+// este modulo resuelve el detalle aritmetico.
 //
-// This two-level decode keeps control_unit simple (it only looks at opcode)
-// and localizes all arithmetic decoding here.
-//
-// alu_ctrl encoding:
-//   0000 = ADD
-//   0001 = SUB
-//   0010 = AND
-//   0011 = OR
-//   0100 = XOR
-//   0101 = SLL  (shift left logical)
-//   0110 = SRL  (shift right logical)
-//   0111 = SRA  (shift right arithmetic)
-//   1000 = SLT  (set less than, signed)
-//   1001 = SLTU (set less than, unsigned)
+// Tabla alu_ctrl:
+//   0000=ADD  0001=SUB  0010=AND  0011=OR   0100=XOR
+//   0101=SLL  0110=SRL  0111=SRA  1000=SLT  1001=SLTU
 // =============================================================================
 module alu_control (
     input [1:0] alu_op,    // viene de control_unit
@@ -49,7 +39,7 @@ always @(*) begin
             endcase
         end
 
-        // I-type arithmetic: funct3=000 is always ADD (func7 is part of immediate, not opcode)
+        // I-type aritmetico: funct3=000 siempre es ADD (func7 forma parte del inmediato, no del opcode)
         2'b11: begin
             case (func3)
                 3'b000: alu_ctrl = 4'b0000; // addi
