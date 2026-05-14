@@ -111,7 +111,26 @@ de la instruccion que se esta ejecutando ahora mismo**. Es simplemente un regist
 - Si `cpu_en = 0`: se queda donde esta (CPU congelada - modo step o halt)
 
 `pc_next` puede ser `PC + 4` (instruccion siguiente) o una direccion de salto.
-`top.v` decide cual de las dos usar.
+`top.v` decide cual de las dos usar en las lineas 146-150:
+
+```verilog
+adder u_pc_plus4  (.a(pc_out),  .b(32'd4),    .out(pc_plus4));   // siempre calcula PC+4
+adder u_pc_branch (.a(pc_out),  .b(imm_ext),  .out(pc_branch));  // siempre calcula PC+offset
+
+mux2to1 u_mux_jump (.sel(jalr),   .a(pc_branch), .b(alu_result), .out(pc_jump));  // JALR usa ALU, no pc+imm
+mux2to1 u_mux_pc   (.sel(pc_src), .a(pc_plus4),  .b(pc_jump),    .out(pc_next)); // decision final
+```
+
+`pc_src` (linea 137) es la senal que activa el salto:
+
+```verilog
+assign pc_src = branch_taken | jal | jalr;
+```
+
+Si `pc_src = 0`: `pc_next = pc_plus4` (secuencial).
+Si `pc_src = 1`: `pc_next = pc_jump` (salto). El mux intermedio `u_mux_jump` elige entre
+`pc_branch` (para JAL y branches, donde el destino es `PC + imm`) y `alu_result` (para JALR,
+donde el destino es `rs1 + imm` calculado por la ALU).
 
 El PC usa `CLOCK_50` como reloj propio, con `cpu_en` como puerta. Solo avanza cuando
 el reloj sube Y cpu_en vale 1.
@@ -156,18 +175,18 @@ sin registros, sin estado. Entrada opcode, salida un conjunto de senales de cont
 
 Cada senal de control abre o cierra una "compuerta" en el camino de datos:
 
-| Senal | Significado cuando vale 1 |
-|-------|--------------------------|
-| `reg_write` | Permite escribir en el banco de registros al final del ciclo |
-| `alu_src` | La ALU usa el inmediato como segundo operando (en vez de rs2) |
-| `alu_a_src` | La ALU usa el PC como primer operando (solo AUIPC) |
-| `mem_write` | Escribe en la memoria de datos (instruccion SW) |
-| `mem_read` | Lee de la memoria de datos (instruccion LW) |
-| `mem_to_reg` | El dato que se escribe en el registro viene de memoria (no de la ALU) |
-| `branch` | Es una instruccion de salto condicional (BEQ, BNE, etc.) |
-| `jal` | Es un salto incondicional tipo JAL |
-| `jalr` | Es un salto incondicional tipo JALR |
-| `alu_op` | Pista de 2 bits para `alu_control` sobre que operacion hacer |
+| Senal | 0 | 1 |
+|-------|---|---|
+| `reg_write` | No se escribe en registros (SW, branches) | Escribe `wb_data` en el registro destino al final del ciclo |
+| `alu_src` | Segundo operando de la ALU = `rs2` (tipo R) | Segundo operando de la ALU = inmediato (tipo I, S, U) |
+| `alu_a_src` | Primer operando de la ALU = `rs1` (caso normal) | Primer operando de la ALU = `PC` (solo AUIPC y JAL) |
+| `mem_write` | No escribe en memoria | Escribe `rs2` en `dmem[alu_result]` (instruccion SW) |
+| `mem_read` | No lee de memoria | Lee `dmem[alu_result]` y lo pone en `mem_data_out` (instruccion LW) |
+| `mem_to_reg` | El valor que se guarda en `rd` viene de la ALU | El valor que se guarda en `rd` viene de memoria (`mem_data_out`) |
+| `branch` | No es un salto condicional | Es BEQ/BNE/BLT/BGE: el salto ocurre solo si `branch_cond` tambien es 1 |
+| `jal` | No es JAL | Es JAL: salta a `PC + imm`, guarda `PC+4` en `rd` |
+| `jalr` | No es JALR | Es JALR: salta a `rs1 + imm` (via ALU), guarda `PC+4` en `rd` |
+| `alu_op` | 2 bits — ver tabla siguiente | |
 
 `alu_op` no dice exactamente que operacion hacer - solo da una pista:
 - `00`: siempre ADD (para loads, stores, LUI, AUIPC, JAL, JALR)

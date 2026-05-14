@@ -143,6 +143,7 @@ pc u_pc (
     .pc_next(pc_next), .pc_out(pc_out)
 );
 
+// --- Sumamos pc's
 adder u_pc_plus4  (.a(pc_out),  .b(32'd4),    .out(pc_plus4));
 adder u_pc_branch (.a(pc_out),  .b(imm_ext),  .out(pc_branch));
 
