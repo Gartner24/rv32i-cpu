@@ -51,7 +51,11 @@ set_global_assignment -name VERILOG_FILE hazard_unit.v
 set_global_assignment -name VERILOG_FILE vga_debug.v
 set_global_assignment -name VERILOG_FILE top.v
 
-# Memory init files ($readmemh)
+# Memory init files
+# program.mif inicializa la memoria de instrucciones on-chip (ram_init_file en
+# instruction_memory.v). Para cambiar el programa: regenerar program.mif y usar
+# "Update MIF" o el In-System Memory Content Editor (ver docs/program-loading.md).
+set_global_assignment -name MIF_FILE program.mif
 set_global_assignment -name MISC_FILE program.hex
 set_global_assignment -name MISC_FILE font128.hex
 

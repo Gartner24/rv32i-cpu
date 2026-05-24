@@ -178,6 +178,33 @@ def binary_to_hex(binary_program):
     return hex_program
 
 
+def binary_to_mif(binary_program, depth=1024):
+    """Genera un Memory Initialization File (.mif) de Intel/Altera.
+
+    El .mif inicializa la memoria de instrucciones on-chip en Quartus y permite
+    cargar el programa sin recompilar el HDL (regenerar el .mif + Update MIF, o
+    editarlo en vivo con el In-System Memory Content Editor por JTAG).
+    Cada direccion es el indice de palabra (PC/4); el dato es la instruccion.
+    """
+    words = [line for line in binary_program.splitlines() if line.strip()]
+    if len(words) > depth:
+        depth = len(words)
+
+    out = [
+        "WIDTH=32;",
+        f"DEPTH={depth};",
+        "ADDRESS_RADIX=HEX;",
+        "DATA_RADIX=HEX;",
+        "CONTENT BEGIN",
+    ]
+    for i, w in enumerate(words):
+        out.append(f"    {i:X} : {int(w, 2):08X};")
+    if len(words) < depth:
+        out.append(f"    [{len(words):X}..{depth - 1:X}] : 00000000;")
+    out.append("END;")
+    return "\n".join(out) + "\n"
+
+
 # --- Instrucciones ---
 
 def type_r_instruction(line):
@@ -656,7 +683,11 @@ def main() -> None:
     symbol_table   = first_pass(source_code)
     binary_program = second_pass(source_code, symbol_table)
     hex_program    = binary_to_hex(binary_program)
+    mif_program    = binary_to_mif(binary_program)
     cleaned        = clean_source_code(source_code, symbol_table)
+
+    # El .mif se escribe junto al .hex (misma ruta, extension .mif).
+    mif_path = hex_path.rsplit(".", 1)[0] + ".mif" if "." in hex_path else hex_path + ".mif"
 
     with open("./program_cleaned.asm", "w", encoding="utf-8") as f:
         f.write(cleaned)
@@ -666,6 +697,9 @@ def main() -> None:
 
     with open(bin_path, "w") as f:
         f.write(binary_program)
+
+    with open(mif_path, "w", encoding="utf-8") as f:
+        f.write(mif_program)
 
 
 if __name__ == "__main__":
