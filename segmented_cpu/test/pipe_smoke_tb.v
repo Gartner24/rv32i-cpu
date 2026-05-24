@@ -64,7 +64,7 @@ initial begin
         check("x3",      dut.u_regfile.regs[3], 32'd12);
         check("x4",      dut.u_regfile.regs[4], 32'd12);
         check("x6(skip)",dut.u_regfile.regs[6], 32'd0);
-        check("dmem[0]", dut.dmem[0], 32'd12);
+        check("dmem[0]", dut.u_dmem.mem[0], 32'd12);
     end
 
     if (errors == 0) $display("PASS: pipe_smoke halted in %0d cycles", cycle_count);

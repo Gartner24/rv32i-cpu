@@ -1,25 +1,26 @@
 // =============================================================================
-// data_memory.v - RAM de 256 palabras (1 KB) para variables y stack.
-// Recibe el arreglo de datos empaquetado desde top.v (donde viven los FF).
-// Devuelve el dato en addr de forma combinacional en el mismo ciclo.
+// data_memory.v - RAM de 256 palabras (1 KB) de la CPU (variables y stack).
+// Bloque autocontenido (como en el diagrama): escritura sincronica en la etapa
+// MEM y lectura combinacional en el mismo ciclo. addr llega en bytes; se usa
+// addr[31:2] como indice de palabra (acceso alineado).
 // =============================================================================
 module data_memory (
-    input  [256*32-1:0] mem_flat,  // 256 palabras x 32 bits, empaquetadas
-    input  mem_read,
+    input         clk,
+    input         mem_write,    // habilita escritura (ya con valid y cpu_en)
+    input         mem_read,
     input  [31:0] addr,
+    input  [31:0] write_data,
     output [31:0] read_data,
-    input  [4:0]  debug_addr,      // palabra 0..31 a mostrar en el VGA
+    input  [4:0]  debug_addr,   // palabra 0..31 a mostrar en la VGA
     output [31:0] debug_data
 );
 
-wire [31:0] mem [0:255];
-genvar gi;
+reg [31:0] mem [0:255];
 
-generate
-    for (gi = 0; gi < 256; gi = gi + 1) begin : unpack
-        assign mem[gi] = mem_flat[32*gi +: 32];
-    end
-endgenerate
+always @(posedge clk) begin
+    if (mem_write)
+        mem[addr[31:2]] <= write_data;
+end
 
 assign read_data  = mem_read ? mem[addr[31:2]] : 32'b0;
 assign debug_data = mem[debug_addr];

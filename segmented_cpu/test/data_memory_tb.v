@@ -1,60 +1,63 @@
 `timescale 1ns/1ps
 module data_memory_tb;
 
-reg [31:0] mem_tb [0:255];
-wire [256*32-1:0] mem_flat;
-
-genvar gi;
-generate
-    for (gi = 0; gi < 256; gi = gi + 1) begin : pack
-        assign mem_flat[32*gi +: 32] = mem_tb[gi];
-    end
-endgenerate
-
-reg        mem_read;
-reg [31:0] addr;
+reg        clk, mem_write, mem_read;
+reg [31:0] addr, write_data;
 wire[31:0] read_data;
+reg  [4:0] debug_addr;
+wire[31:0] debug_data;
 
 data_memory dut (
-    .mem_flat(mem_flat),
-    .mem_read(mem_read),
-    .addr(addr),
-    .read_data(read_data)
+    .clk(clk),
+    .mem_write(mem_write), .mem_read(mem_read),
+    .addr(addr), .write_data(write_data),
+    .read_data(read_data),
+    .debug_addr(debug_addr), .debug_data(debug_data)
 );
 
-integer i, errors;
+always #5 clk = ~clk;
+
+integer errors;
+
+task wr;  // escribe en una palabra (byte addr a) en un flanco de reloj
+    input [31:0] a;
+    input [31:0] d;
+    begin
+        @(negedge clk); mem_write = 1; addr = a; write_data = d;
+        @(posedge clk); #1; mem_write = 0;
+    end
+endtask
+
 initial begin
     errors = 0;
-    for (i = 0; i < 256; i = i + 1) mem_tb[i] = 32'b0;
-    mem_read = 0; addr = 0;
-    #1;
+    clk = 0; mem_write = 0; mem_read = 0; addr = 0; write_data = 0; debug_addr = 0;
 
-    // Write word 0, read back
-    mem_tb[0] = 32'hDEADBEEF;
-    addr = 32'd0; mem_read = 1; #1;
-    if (read_data !== 32'hDEADBEEF) begin $display("FAIL: word0 read got %0h", read_data); errors = errors+1; end
+    // Escribir palabra 0 (byte addr 0), leer
+    wr(32'd0, 32'hDEADBEEF);
+    mem_read = 1; addr = 32'd0; #1;
+    if (read_data !== 32'hDEADBEEF) begin $display("FAIL: word0 got %0h", read_data); errors = errors+1; end
 
-    // Write word 1 (byte addr 4), read back
-    mem_tb[1] = 32'hCAFEBABE;
+    // Escribir palabra 1 (byte addr 4), leer
+    wr(32'd4, 32'hCAFEBABE);
     addr = 32'd4; #1;
-    if (read_data !== 32'hCAFEBABE) begin $display("FAIL: word1 read got %0h", read_data); errors = errors+1; end
+    if (read_data !== 32'hCAFEBABE) begin $display("FAIL: word1 got %0h", read_data); errors = errors+1; end
 
-    // Word 0 still intact
+    // Palabra 0 sigue intacta
     addr = 32'd0; #1;
-    if (read_data !== 32'hDEADBEEF) begin $display("FAIL: word0 still expected DEADBEEF got %0h", read_data); errors = errors+1; end
+    if (read_data !== 32'hDEADBEEF) begin $display("FAIL: word0 intact got %0h", read_data); errors = errors+1; end
 
-    // mem_read=0 returns 0
+    // mem_read=0 devuelve 0
     mem_read = 0; #1;
-    if (read_data !== 32'd0) begin $display("FAIL: mem_read=0 expected 0 got %0h", read_data); errors = errors+1; end
+    if (read_data !== 32'd0) begin $display("FAIL: mem_read=0 got %0h", read_data); errors = errors+1; end
 
-    // Write word 2 (byte addr 8), read back
-    mem_tb[2] = 32'hAAAAAAAA;
-    addr = 32'd8; mem_read = 1; #1;
-    if (read_data !== 32'hAAAAAAAA) begin $display("FAIL: word2 read got %0h", read_data); errors = errors+1; end
-
-    // Overwrite word 2, read back
-    mem_tb[2] = 32'hABCD1234; #1;
+    // Sobrescribir palabra 1
+    wr(32'd4, 32'hABCD1234);
+    mem_read = 1; addr = 32'd4; #1;
     if (read_data !== 32'hABCD1234) begin $display("FAIL: rewrite got %0h", read_data); errors = errors+1; end
+
+    // Puerto de depuracion (palabra 0)
+    debug_addr = 5'd0; #1;
+    if (debug_data !== 32'hDEADBEEF) begin $display("FAIL: debug word0 got %0h", debug_data); errors = errors+1; end
 
     if (errors == 0) $display("PASS: data_memory");
     else             $display("FAIL: data_memory (%0d errors)", errors);

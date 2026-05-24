@@ -71,7 +71,7 @@ initial begin
         check("x4(use)", dut.u_regfile.regs[4], 32'd43);
         check("x5(skip)",dut.u_regfile.regs[5], 32'd0);
         check("x6",      dut.u_regfile.regs[6], 32'd7);
-        check("dmem[0]", dut.dmem[0], 32'd42);
+        check("dmem[0]", dut.u_dmem.mem[0], 32'd42);
     end
 
     if (errors == 0) $display("PASS: pipe_hazard halted in %0d cycles", cycle_count);

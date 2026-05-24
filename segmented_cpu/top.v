@@ -93,9 +93,6 @@ reg [31:0] MEMWB_alu_result, MEMWB_mem_data, MEMWB_pc4, MEMWB_instr;
 reg        MEMWB_valid;
 reg        MEMWB_reg_write, MEMWB_mem_to_reg, MEMWB_jal, MEMWB_jalr;
 
-// --- Almacenamiento de memoria de datos (se mueve a data_memory.v en Step B) ---
-reg [31:0] dmem [0:255];
-wire [256*32-1:0] dmem_flat;
 
 // =====================================================================
 //  Etapa WB (combinacional) - se calcula primero porque alimenta a ID
@@ -236,9 +233,11 @@ wire [31:0] store_data_EX = fwd_b;
 // =====================================================================
 wire [31:0] mem_data_MEM;
 data_memory u_dmem (
-    .mem_flat(dmem_flat),
+    .clk(CLOCK_50),
+    .mem_write(cpu_en & EXMEM_valid & EXMEM_mem_write),
     .mem_read(EXMEM_mem_read),
     .addr(EXMEM_alu_result),
+    .write_data(EXMEM_store_data),
     .read_data(mem_data_MEM),
     .debug_addr(vga_mem_addr),
     .debug_data(vga_mem_data)
@@ -335,20 +334,6 @@ always @(posedge CLOCK_50 or posedge rst) begin
             halted <= 1'b1;
     end
 end
-
-// escritura a memoria de datos (etapa MEM)
-always @(posedge CLOCK_50) begin
-    if (cpu_en && EXMEM_valid && EXMEM_mem_write)
-        dmem[EXMEM_alu_result[31:2]] <= EXMEM_store_data;
-end
-
-// empaquetado de dmem hacia data_memory (se elimina en Step B)
-genvar gmi;
-generate
-    for (gmi = 0; gmi < 256; gmi = gmi + 1) begin : pack_dmem
-        assign dmem_flat[32*gmi +: 32] = dmem[gmi];
-    end
-endgenerate
 
 // =====================================================================
 //  VGA: vista por etapas del pipeline (Step 5)
