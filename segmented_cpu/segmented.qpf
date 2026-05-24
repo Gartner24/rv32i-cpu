@@ -1,0 +1,6 @@
+QUARTUS_VERSION = "23.1"
+DATE = "00:00:00  April 02, 2026"
+
+# Revisions
+
+PROJECT_REVISION = "segmented"
