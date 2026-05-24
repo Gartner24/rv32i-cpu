@@ -365,7 +365,7 @@ generate
 endgenerate
 
 // =====================================================================
-//  VGA (vista provisional; el rediseno por etapas es el Step 5)
+//  VGA: vista por etapas del pipeline (Step 5)
 // =====================================================================
 wire [9:0] vga_x, vga_y;
 wire       vga_video_on;
@@ -378,16 +378,20 @@ vga_controller u_vgac (
 
 vga_debug u_vgad (
     .video_on(vga_video_on), .x(vga_x), .y(vga_y),
-    .pc_out(pc_out), .instr(IFID_instr), .imm_ext(IDEX_imm),
-    .alu_result(alu_result),
-    .alu_operand_a(alu_a), .alu_operand_b(alu_b),
-    .reg_data1(rdata1_ID), .reg_data2(rdata2_ID),
-    .wb_data(wb_data), .mem_data_out(mem_data_MEM),
-    .alu_zero(alu_zero), .halted(halted), .branch_taken(branch_taken),
-    .alu_op(IDEX_alu_op), .alu_ctrl(alu_ctrl),
-    .reg_write(c_reg_write), .mem_read(c_mem_read), .mem_write(c_mem_write),
-    .mem_to_reg(c_mem_to_reg), .alu_src(c_alu_src), .alu_a_src(c_alu_a_src),
-    .branch(c_branch), .jal(c_jal), .jalr(c_jalr), .pc_src(pc_src),
+    // IF
+    .if_pc(pc_out),       .if_instr(instr_IF),
+    // ID
+    .id_pc(IFID_pc),      .id_instr(IFID_instr),
+    // EX
+    .ex_pc(IDEX_pc),      .ex_instr(IDEX_instr), .ex_alu(alu_result),
+    // MEM
+    .mem_instr(EXMEM_instr), .mem_alu(EXMEM_alu_result),
+    // WB
+    .wb_instr(MEMWB_instr), .wb_data(wb_data), .wb_rd(wb_rd), .wb_we(wb_we),
+    // riesgos / forwarding / halt
+    .stall(load_use_stall), .flush(flush),
+    .forward_a(forward_a), .forward_b(forward_b), .halted(halted),
+    // depuracion de registros y memoria
     .reg_debug_addr(vga_dbg_addr), .reg_debug_data(vga_dbg_data),
     .mem_debug_addr(vga_mem_addr), .mem_debug_data(vga_mem_data),
     .vga_r(VGA_R), .vga_g(VGA_G), .vga_b(VGA_B)
