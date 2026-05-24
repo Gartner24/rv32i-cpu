@@ -85,9 +85,10 @@ reg        IDEX_reg_write, IDEX_alu_src, IDEX_alu_a_src, IDEX_mem_write,
 reg [1:0]  IDEX_alu_op;
 // EX/MEM
 reg [31:0] EXMEM_alu_result, EXMEM_store_data, EXMEM_pc4, EXMEM_instr;
+reg [31:0] EXMEM_branch_target;
 reg        EXMEM_valid;
 reg        EXMEM_reg_write, EXMEM_mem_write, EXMEM_mem_read, EXMEM_mem_to_reg,
-           EXMEM_jal, EXMEM_jalr;
+           EXMEM_jal, EXMEM_jalr, EXMEM_pc_src;
 // MEM/WB
 reg [31:0] MEMWB_alu_result, MEMWB_mem_data, MEMWB_pc4, MEMWB_instr;
 reg        MEMWB_valid;
@@ -108,19 +109,24 @@ wire        wb_we   = MEMWB_valid & MEMWB_reg_write & (wb_rd != 5'b0);
 wire [31:0] pc_out, instr_IF, pc4_IF;
 wire [31:0] pc_next;
 
-// senales de salto generadas en EX (declaradas aqui para el mux de PC)
-wire        pc_src;
-wire [31:0] branch_target;
-
 // freno de fetch al ver ebreak/nula (no busca mas alla del fin del programa)
 wire        ebreak_IF = (instr_IF == EBREAK_INSTR) || (instr_IF == 32'h00000000);
 
-// control de riesgos: stall por load-use, flush por salto tomado en EX
-wire        load_use_stall;          // de hazard_unit (instanciada abajo)
-wire        flush = pc_src;          // salto/branch tomado resuelto en EX
-wire        pc_en = cpu_en & ~load_use_stall & ~ebreak_IF;
+// Control de riesgos:
+//   - stall por load-use (carga en EX).
+//   - flush por salto tomado, resuelto en MEM (como el diagrama): PCSrc viene
+//     de la etapa MEM (EX/MEM). Un salto tomado descarta 3 instrucciones jovenes.
+//   - Prioridad flush > stall: un salto tomado en MEM anula el stall de una
+//     carga mas joven (que de todos modos se descarta).
+wire        load_use_stall;                       // de hazard_unit
+wire        flush     = EXMEM_valid & EXMEM_pc_src;
+wire        stall_eff = load_use_stall & ~flush;
+// El flush (salto tomado) tiene prioridad sobre el freno por ebreak: si se
+// busco especulativamente un ebreak detras del salto, el redireccion debe
+// ganar para no congelar el PC en una instruccion que no se debe ejecutar.
+wire        pc_en     = cpu_en & ~stall_eff & (flush | ~ebreak_IF);
 
-assign pc_next = pc_src ? branch_target : pc4_IF;
+assign pc_next = flush ? EXMEM_branch_target : pc4_IF;
 
 pc u_pc (.clk(CLOCK_50), .rst(rst), .en(pc_en), .pc_next(pc_next), .pc_out(pc_out));
 adder u_pc_plus4 (.a(pc_out), .b(32'd4), .out(pc4_IF));
@@ -221,11 +227,12 @@ always @(*) begin
         default: branch_cond = 1'b0;
     endcase
 end
-wire branch_taken = IDEX_valid & IDEX_branch & branch_cond;
-assign pc_src        = branch_taken | (IDEX_valid & (IDEX_jal | IDEX_jalr));
-assign branch_target = IDEX_jalr ? alu_result : pc_branch_EX;
+// Decision de salto calculada en EX; se LATCHEA en EX/MEM y se actua en MEM.
+wire branch_taken    = IDEX_valid & IDEX_branch & branch_cond;
+wire pc_src_EX       = branch_taken | (IDEX_valid & (IDEX_jal | IDEX_jalr));
+wire [31:0] branch_target_EX = IDEX_jalr ? alu_result : pc_branch_EX;
 
-// dato a almacenar (store) - Step 1 sin forwarding
+// dato a almacenar (store)
 wire [31:0] store_data_EX = fwd_b;
 
 // =====================================================================
@@ -252,7 +259,7 @@ always @(posedge CLOCK_50 or posedge rst) begin
         IDEX_valid  <= 1'b0; IDEX_instr <= NOP_INSTR;
         IDEX_reg_write <= 1'b0; IDEX_mem_write <= 1'b0;
         EXMEM_valid <= 1'b0; EXMEM_instr <= NOP_INSTR;
-        EXMEM_reg_write <= 1'b0; EXMEM_mem_write <= 1'b0;
+        EXMEM_reg_write <= 1'b0; EXMEM_mem_write <= 1'b0; EXMEM_pc_src <= 1'b0;
         MEMWB_valid <= 1'b0; MEMWB_instr <= NOP_INSTR;
         MEMWB_reg_write <= 1'b0;
         halted      <= 1'b0;
@@ -304,17 +311,33 @@ always @(posedge CLOCK_50 or posedge rst) begin
         end
 
         // EX -> EX/MEM
-        EXMEM_alu_result <= alu_result;
-        EXMEM_store_data <= store_data_EX;
-        EXMEM_pc4        <= IDEX_pc4;
-        EXMEM_instr      <= IDEX_instr;
-        EXMEM_valid      <= IDEX_valid;
-        EXMEM_reg_write  <= IDEX_reg_write;
-        EXMEM_mem_write  <= IDEX_mem_write;
-        EXMEM_mem_read   <= IDEX_mem_read;
-        EXMEM_mem_to_reg <= IDEX_mem_to_reg;
-        EXMEM_jal        <= IDEX_jal;
-        EXMEM_jalr       <= IDEX_jalr;
+        //   flush: la instruccion joven en EX se descarta (burbuja); el salto
+        //   que provoco el flush ya esta en MEM y avanza a MEM/WB normalmente.
+        if (flush) begin
+            EXMEM_valid      <= 1'b0;
+            EXMEM_instr      <= NOP_INSTR;
+            EXMEM_reg_write  <= 1'b0;
+            EXMEM_mem_write  <= 1'b0;
+            EXMEM_mem_read   <= 1'b0;
+            EXMEM_mem_to_reg <= 1'b0;
+            EXMEM_jal        <= 1'b0;
+            EXMEM_jalr       <= 1'b0;
+            EXMEM_pc_src     <= 1'b0;
+        end else begin
+            EXMEM_alu_result    <= alu_result;
+            EXMEM_store_data    <= store_data_EX;
+            EXMEM_pc4           <= IDEX_pc4;
+            EXMEM_instr         <= IDEX_instr;
+            EXMEM_valid         <= IDEX_valid;
+            EXMEM_reg_write     <= IDEX_reg_write;
+            EXMEM_mem_write     <= IDEX_mem_write;
+            EXMEM_mem_read      <= IDEX_mem_read;
+            EXMEM_mem_to_reg    <= IDEX_mem_to_reg;
+            EXMEM_jal           <= IDEX_jal;
+            EXMEM_jalr          <= IDEX_jalr;
+            EXMEM_pc_src        <= pc_src_EX;
+            EXMEM_branch_target <= branch_target_EX;
+        end
 
         // MEM -> MEM/WB
         MEMWB_alu_result <= EXMEM_alu_result;
