@@ -8,7 +8,7 @@ wire [31:0] read_data1, read_data2, debug_data;
 
 register_file dut (
     .clk(clk), .rst(rst),
-    .we(we), .wa(wa), .wd(wd),
+    .write_enable(we), .write_reg(wa), .write_data(wd),
     .rs1(rs1), .rs2(rs2),
     .debug_addr(debug_addr),
     .read_data1(read_data1), .read_data2(read_data2),

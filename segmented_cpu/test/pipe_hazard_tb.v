@@ -13,8 +13,8 @@
 `timescale 1ns/1ps
 module pipe_hazard_tb;
 
-defparam dut.u_imem.HEX_FILE  = "pipe_hazard.hex";
-defparam dut.u_imem.MEM_DEPTH = 256;
+defparam dut.u_instruction_memory.HEX_FILE  = "pipe_hazard.hex";
+defparam dut.u_instruction_memory.MEM_DEPTH = 256;
 
 reg        CLOCK_50;
 reg  [3:0] KEY;
@@ -66,12 +66,12 @@ initial begin
         $display("FAIL: pipe_hazard did not halt within %0d cycles", cycle_count);
         errors = errors + 1;
     end else begin
-        check("x2",      dut.u_regfile.regs[2], 32'd42);
-        check("x3(lw)",  dut.u_regfile.regs[3], 32'd42);
-        check("x4(use)", dut.u_regfile.regs[4], 32'd43);
-        check("x5(skip)",dut.u_regfile.regs[5], 32'd0);
-        check("x6",      dut.u_regfile.regs[6], 32'd7);
-        check("dmem[0]", dut.u_dmem.mem[0], 32'd42);
+        check("x2",      dut.u_register_file.registers[2], 32'd42);
+        check("x3(lw)",  dut.u_register_file.registers[3], 32'd42);
+        check("x4(use)", dut.u_register_file.registers[4], 32'd43);
+        check("x5(skip)",dut.u_register_file.registers[5], 32'd0);
+        check("x6",      dut.u_register_file.registers[6], 32'd7);
+        check("dmem[0]", dut.u_data_memory.memory[0], 32'd42);
     end
 
     if (errors == 0) $display("PASS: pipe_hazard halted in %0d cycles", cycle_count);

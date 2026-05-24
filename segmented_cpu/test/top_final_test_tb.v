@@ -3,8 +3,8 @@
 `timescale 1ns/1ps
 module top_final_test_tb;
 
-defparam dut.u_imem.HEX_FILE  = "../../assembler/final_test.hex";
-defparam dut.u_imem.MEM_DEPTH = 1024;
+defparam dut.u_instruction_memory.HEX_FILE  = "../../assembler/final_test.hex";
+defparam dut.u_instruction_memory.MEM_DEPTH = 1024;
 
 reg        CLOCK_50;
 reg  [3:0] KEY;
@@ -48,9 +48,9 @@ initial begin
         $display("FAIL: final_test did not halt within %0d cycles", cycle_count);
         errors = errors + 1;
     end else begin
-        if (dut.u_regfile.regs[10] !== 32'd0) begin
+        if (dut.u_register_file.registers[10] !== 32'd0) begin
             $display("FAIL: final_test x10 (exit code) expected 0 got %0d (0x%0h)",
-                     $signed(dut.u_regfile.regs[10]), dut.u_regfile.regs[10]);
+                     $signed(dut.u_register_file.registers[10]), dut.u_register_file.registers[10]);
             errors = errors + 1;
         end else begin
             $display("PASS: final_test halted in %0d cycles, x10=0", cycle_count);

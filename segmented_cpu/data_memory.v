@@ -6,23 +6,23 @@
 // =============================================================================
 module data_memory (
     input         clk,
-    input         mem_write,    // habilita escritura (ya con valid y cpu_en)
+    input         mem_write,     // habilita escritura (ya con valido y cpu_enable)
     input         mem_read,
     input  [31:0] addr,
     input  [31:0] write_data,
     output [31:0] read_data,
-    input  [4:0]  debug_addr,   // palabra 0..31 a mostrar en la VGA
+    input  [4:0]  debug_addr,    // palabra 0..31 a mostrar en la VGA
     output [31:0] debug_data
 );
 
-reg [31:0] mem [0:255];
+reg [31:0] memory [0:255];
 
 always @(posedge clk) begin
     if (mem_write)
-        mem[addr[31:2]] <= write_data;
+        memory[addr[31:2]] <= write_data;
 end
 
-assign read_data  = mem_read ? mem[addr[31:2]] : 32'b0;
-assign debug_data = mem[debug_addr];
+assign read_data  = mem_read ? memory[addr[31:2]] : 32'b0;
+assign debug_data = memory[debug_addr];
 
 endmodule
