@@ -48,9 +48,9 @@ initial begin
         $display("FAIL: final_test did not halt within %0d cycles", cycle_count);
         errors = errors + 1;
     end else begin
-        if (dut.regs[10] !== 32'd0) begin
+        if (dut.u_regfile.regs[10] !== 32'd0) begin
             $display("FAIL: final_test x10 (exit code) expected 0 got %0d (0x%0h)",
-                     $signed(dut.regs[10]), dut.regs[10]);
+                     $signed(dut.u_regfile.regs[10]), dut.u_regfile.regs[10]);
             errors = errors + 1;
         end else begin
             $display("PASS: final_test halted in %0d cycles, x10=0", cycle_count);

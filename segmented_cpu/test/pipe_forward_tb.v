@@ -64,12 +64,12 @@ initial begin
         $display("FAIL: pipe_forward did not halt within %0d cycles", cycle_count);
         errors = errors + 1;
     end else begin
-        check("x1", dut.regs[1], 32'd5);
-        check("x2", dut.regs[2], 32'd8);
-        check("x3", dut.regs[3], 32'd9);
-        check("x4", dut.regs[4], 32'd13);
-        check("x5", dut.regs[5], 32'd4);
-        check("x6", dut.regs[6], 32'd1);
+        check("x1", dut.u_regfile.regs[1], 32'd5);
+        check("x2", dut.u_regfile.regs[2], 32'd8);
+        check("x3", dut.u_regfile.regs[3], 32'd9);
+        check("x4", dut.u_regfile.regs[4], 32'd13);
+        check("x5", dut.u_regfile.regs[5], 32'd4);
+        check("x6", dut.u_regfile.regs[6], 32'd1);
     end
 
     if (errors == 0) $display("PASS: pipe_forward halted in %0d cycles", cycle_count);

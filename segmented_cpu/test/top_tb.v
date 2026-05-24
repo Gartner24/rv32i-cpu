@@ -58,14 +58,14 @@ initial begin
     wait_cycles(12);
     #1;
 
-    if (dut.regs[1] !== 32'd5)
-        begin $display("FAIL: x1 expected 5 got %0d",  dut.regs[1]); errors = errors+1; end
-    if (dut.regs[2] !== 32'd10)
-        begin $display("FAIL: x2 expected 10 got %0d", dut.regs[2]); errors = errors+1; end
-    if (dut.regs[3] !== 32'd15)
-        begin $display("FAIL: x3 expected 15 got %0d", dut.regs[3]); errors = errors+1; end
-    if (dut.regs[4] !== 32'd15)
-        begin $display("FAIL: x4 expected 15 got %0d", dut.regs[4]); errors = errors+1; end
+    if (dut.u_regfile.regs[1] !== 32'd5)
+        begin $display("FAIL: x1 expected 5 got %0d",  dut.u_regfile.regs[1]); errors = errors+1; end
+    if (dut.u_regfile.regs[2] !== 32'd10)
+        begin $display("FAIL: x2 expected 10 got %0d", dut.u_regfile.regs[2]); errors = errors+1; end
+    if (dut.u_regfile.regs[3] !== 32'd15)
+        begin $display("FAIL: x3 expected 15 got %0d", dut.u_regfile.regs[3]); errors = errors+1; end
+    if (dut.u_regfile.regs[4] !== 32'd15)
+        begin $display("FAIL: x4 expected 15 got %0d", dut.u_regfile.regs[4]); errors = errors+1; end
 
     // LEDR[0] mirrors SW[0]
     if (LEDR[0] !== 1'b0)

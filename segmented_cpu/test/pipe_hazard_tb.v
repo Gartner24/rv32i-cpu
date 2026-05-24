@@ -66,11 +66,11 @@ initial begin
         $display("FAIL: pipe_hazard did not halt within %0d cycles", cycle_count);
         errors = errors + 1;
     end else begin
-        check("x2",      dut.regs[2], 32'd42);
-        check("x3(lw)",  dut.regs[3], 32'd42);
-        check("x4(use)", dut.regs[4], 32'd43);
-        check("x5(skip)",dut.regs[5], 32'd0);
-        check("x6",      dut.regs[6], 32'd7);
+        check("x2",      dut.u_regfile.regs[2], 32'd42);
+        check("x3(lw)",  dut.u_regfile.regs[3], 32'd42);
+        check("x4(use)", dut.u_regfile.regs[4], 32'd43);
+        check("x5(skip)",dut.u_regfile.regs[5], 32'd0);
+        check("x6",      dut.u_regfile.regs[6], 32'd7);
         check("dmem[0]", dut.dmem[0], 32'd42);
     end
 

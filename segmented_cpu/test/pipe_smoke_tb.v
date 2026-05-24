@@ -59,11 +59,11 @@ initial begin
         $display("FAIL: pipe_smoke did not halt within %0d cycles", cycle_count);
         errors = errors + 1;
     end else begin
-        check("x1",      dut.regs[1], 32'd5);
-        check("x2",      dut.regs[2], 32'd7);
-        check("x3",      dut.regs[3], 32'd12);
-        check("x4",      dut.regs[4], 32'd12);
-        check("x6(skip)",dut.regs[6], 32'd0);
+        check("x1",      dut.u_regfile.regs[1], 32'd5);
+        check("x2",      dut.u_regfile.regs[2], 32'd7);
+        check("x3",      dut.u_regfile.regs[3], 32'd12);
+        check("x4",      dut.u_regfile.regs[4], 32'd12);
+        check("x6(skip)",dut.u_regfile.regs[6], 32'd0);
         check("dmem[0]", dut.dmem[0], 32'd12);
     end
 

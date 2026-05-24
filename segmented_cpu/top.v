@@ -93,12 +93,9 @@ reg [31:0] MEMWB_alu_result, MEMWB_mem_data, MEMWB_pc4, MEMWB_instr;
 reg        MEMWB_valid;
 reg        MEMWB_reg_write, MEMWB_mem_to_reg, MEMWB_jal, MEMWB_jalr;
 
-// --- Almacenamiento arquitectonico (FF en top) ---
-reg [31:0] regs [0:31];
+// --- Almacenamiento de memoria de datos (se mueve a data_memory.v en Step B) ---
 reg [31:0] dmem [0:255];
-wire [32*32-1:0]  regs_flat;
 wire [256*32-1:0] dmem_flat;
-integer ri;
 
 // =====================================================================
 //  Etapa WB (combinacional) - se calcula primero porque alimenta a ID
@@ -137,7 +134,7 @@ instruction_memory u_imem (.addr(pc_out), .instr(instr_IF));
 // =====================================================================
 wire [4:0]  rs1_ID = IFID_instr[19:15];
 wire [4:0]  rs2_ID = IFID_instr[24:20];
-wire [31:0] rf_rdata1, rf_rdata2, imm_ID, exit_code;
+wire [31:0] rdata1_ID, rdata2_ID, imm_ID;
 
 wire        c_reg_write, c_alu_src, c_alu_a_src, c_mem_write, c_mem_read,
             c_mem_to_reg, c_branch, c_jal, c_jalr;
@@ -156,21 +153,18 @@ wire [31:0] vga_dbg_data;
 wire [4:0]  vga_mem_addr;
 wire [31:0] vga_mem_data;
 
+// El banco de registros tiene su puerto de escritura sincronico (etapa WB) y el
+// bypass write-first interno (cubre la dependencia a distancia 3).
 register_file u_regfile (
-    .regs_flat(regs_flat),
+    .clk(CLOCK_50), .rst(rst),
+    .we(cpu_en & wb_we), .wa(wb_rd), .wd(wb_data),
     .rs1(rs1_ID), .rs2(rs2_ID),
     .debug_addr(vga_dbg_addr),
-    .read_data1(rf_rdata1), .read_data2(rf_rdata2),
-    .debug_data(vga_dbg_data), .exit_code(exit_code)
+    .read_data1(rdata1_ID), .read_data2(rdata2_ID),
+    .debug_data(vga_dbg_data)
 );
 
 imm_gen u_immgen (.instr(IFID_instr), .imm_out(imm_ID));
-
-// Bypass WB->ID: si la instruccion en WB escribe el mismo registro que se lee
-// aqui, se usa wb_data directamente (cubre la dependencia a distancia 3, que el
-// forwarding EX/MEM y MEM/WB no alcanza por la escritura sincronica del banco).
-wire [31:0] rdata1_ID = (wb_we && (wb_rd == rs1_ID)) ? wb_data : rf_rdata1;
-wire [31:0] rdata2_ID = (wb_we && (wb_rd == rs2_ID)) ? wb_data : rf_rdata2;
 
 // =====================================================================
 //  Etapa EX (execute)
@@ -263,7 +257,6 @@ always @(posedge CLOCK_50 or posedge rst) begin
         MEMWB_valid <= 1'b0; MEMWB_instr <= NOP_INSTR;
         MEMWB_reg_write <= 1'b0;
         halted      <= 1'b0;
-        for (ri = 0; ri < 32; ri = ri + 1) regs[ri] <= 32'b0;
     end else if (cpu_en) begin
         // IF -> IF/ID
         //   flush (salto tomado): burbuja; stall (load-use): congelar (mantener)
@@ -335,8 +328,7 @@ always @(posedge CLOCK_50 or posedge rst) begin
         MEMWB_jal        <= EXMEM_jal;
         MEMWB_jalr       <= EXMEM_jalr;
 
-        // WB: escritura al banco de registros
-        if (wb_we) regs[wb_rd] <= wb_data;
+        // WB: la escritura al banco de registros vive en register_file.v
 
         // halt cuando un ebreak/instr-nula valido llega a WB
         if (MEMWB_valid && (MEMWB_instr == EBREAK_INSTR || MEMWB_instr == 32'h00000000))
@@ -350,13 +342,7 @@ always @(posedge CLOCK_50) begin
         dmem[EXMEM_alu_result[31:2]] <= EXMEM_store_data;
 end
 
-// empaquetado de regs y dmem hacia los submodulos combinacionales
-genvar gri;
-generate
-    for (gri = 0; gri < 32; gri = gri + 1) begin : pack_regs
-        assign regs_flat[32*gri +: 32] = regs[gri];
-    end
-endgenerate
+// empaquetado de dmem hacia data_memory (se elimina en Step B)
 genvar gmi;
 generate
     for (gmi = 0; gmi < 256; gmi = gmi + 1) begin : pack_dmem
