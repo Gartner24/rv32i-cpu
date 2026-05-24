@@ -95,6 +95,8 @@ wire [31:0] wb_data;
 wire [31:0] exit_code;
 wire [4:0]  vga_dbg_addr;
 wire [31:0] vga_dbg_data;
+wire [4:0]  vga_mem_addr;
+wire [31:0] vga_mem_data;
 
 // --- Senales de control ---
 wire        reg_write;
@@ -185,7 +187,9 @@ data_memory u_dmem (
     .mem_flat(dmem_flat),
     .mem_read(mem_read),
     .addr(alu_result),
-    .read_data(mem_data_out)
+    .read_data(mem_data_out),
+    .debug_addr(vga_mem_addr),
+    .debug_data(vga_mem_data)
 );
 
 // Write-back: mem_to_reg elige entre resultado de ALU o dato de memoria.
@@ -233,13 +237,18 @@ vga_controller u_vgac (
 
 vga_debug u_vgad (
     .video_on(vga_video_on), .x(vga_x), .y(vga_y),
-    .pc_out(pc_out), .instr(instr), .alu_result(alu_result),
-    .imm_ext(imm_ext), .mem_data_out(mem_data_out),
-    .alu_zero(alu_zero), .halted(halted),
+    .pc_out(pc_out), .instr(instr), .imm_ext(imm_ext),
+    .alu_result(alu_result),
+    .alu_operand_a(alu_operand_a), .alu_operand_b(alu_operand_b),
+    .reg_data1(reg_data1), .reg_data2(reg_data2),
+    .wb_data(wb_data), .mem_data_out(mem_data_out),
+    .alu_zero(alu_zero), .halted(halted), .branch_taken(branch_taken),
+    .alu_op(alu_op), .alu_ctrl(alu_ctrl),
     .reg_write(reg_write), .mem_read(mem_read), .mem_write(mem_write),
-    .mem_to_reg(mem_to_reg), .alu_src(alu_src),
+    .mem_to_reg(mem_to_reg), .alu_src(alu_src), .alu_a_src(alu_a_src),
     .branch(branch), .jal(jal), .jalr(jalr), .pc_src(pc_src),
     .reg_debug_addr(vga_dbg_addr), .reg_debug_data(vga_dbg_data),
+    .mem_debug_addr(vga_mem_addr), .mem_debug_data(vga_mem_data),
     .vga_r(VGA_R), .vga_g(VGA_G), .vga_b(VGA_B)
 );
 

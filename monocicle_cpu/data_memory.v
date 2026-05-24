@@ -7,7 +7,9 @@ module data_memory (
     input  [256*32-1:0] mem_flat,  // 256 palabras x 32 bits, empaquetadas
     input  mem_read,
     input  [31:0] addr,
-    output [31:0] read_data
+    output [31:0] read_data,
+    input  [4:0]  debug_addr,      // palabra 0..31 a mostrar en el VGA
+    output [31:0] debug_data
 );
 
 wire [31:0] mem [0:255];
@@ -19,6 +21,7 @@ generate
     end
 endgenerate
 
-assign read_data = mem_read ? mem[addr[31:2]] : 32'b0;
+assign read_data  = mem_read ? mem[addr[31:2]] : 32'b0;
+assign debug_data = mem[debug_addr];
 
 endmodule
