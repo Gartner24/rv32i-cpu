@@ -63,6 +63,10 @@ set_global_assignment -name MIF_FILE program.mif
 set_global_assignment -name MISC_FILE program.hex
 set_global_assignment -name MISC_FILE font128.hex
 
+# Restricciones de tiempo (reloj de 50 MHz). Sin esto el Timing Analyzer asume
+# 1 GHz y reporta fallos de timing falsos.
+set_global_assignment -name SDC_FILE segmented.sdc
+
 set_global_assignment -name MIN_CORE_JUNCTION_TEMP 0
 set_global_assignment -name MAX_CORE_JUNCTION_TEMP 85
 set_global_assignment -name POWER_PRESET_COOLING_SOLUTION "23 MM HEAT SINK WITH 200 LFPM AIRFLOW"

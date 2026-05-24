@@ -112,9 +112,10 @@ unico registro "de la ruta de datos" propiamente: en cada flanco, si `en=1`,
 ### `instruction_memory.v`
 La memoria de programa (ROM). Puertos: `addr` (byte) -> `instr`. Lectura
 combinacional: `instr = mem[addr[31:2]]` (descarta los 2 bits bajos porque cada
-instruccion ocupa 4 bytes). En simulacion se carga con `$readmemh` (macro
-`SIMULATION`); en sintesis se inicializa desde `program.mif`
-(ver `docs/program-loading.md`).
+instruccion ocupa 4 bytes). El programa se carga con `$readmemh(HEX_FILE)`,
+tanto en simulacion como en sintesis (Quartus hornea esos valores como ROM).
+El assembler tambien genera `program.mif` para el flujo del In-System Memory
+Content Editor (ver `docs/program-loading.md`).
 
 ---
 
@@ -349,8 +350,9 @@ Los testbenches miran el estado interno con rutas jerarquicas:
 `dut.u_register_file.registers[N]`, `dut.u_data_memory.memory[N]`,
 `dut.u_pc.pc_out`, `dut.halted`.
 
-> Nota: la simulacion compila con `-DSIMULATION` para que la memoria de
-> instrucciones use `$readmemh`. La sintesis en Quartus usa `program.mif`.
+> Nota: la memoria de instrucciones usa `$readmemh(HEX_FILE)` en simulacion y
+> en sintesis. En Quartus se necesita `segmented.sdc` (reloj de 50 MHz); sin el,
+> el Timing Analyzer asume 1 GHz y reporta fallos de timing falsos.
 
 ---
 

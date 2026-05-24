@@ -1,7 +1,5 @@
 SRC := ..
-# -DSIMULATION: instruction_memory usa $readmemh (HEX_FILE) en simulacion;
-# en sintesis (Quartus, sin esta macro) se inicializa desde program.mif.
-IV  := iverilog -DSIMULATION
+IV  := iverilog
 VVP := vvp
 
 UNIT_TESTS := adder mux2to1 alu alu_control control_unit imm_gen pc register_file data_memory hex_display

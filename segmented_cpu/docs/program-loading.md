@@ -20,9 +20,16 @@ de palabra = PC/4) y rellena con ceros hasta `DEPTH=1024`.
 
 ## 2. Sintesis (Quartus)
 
-`instruction_memory.v` inicializa la RAM on-chip desde `program.mif` mediante el
-atributo `(* ram_init_file = "program.mif" *)`. El `.mif` esta listado en
-`segmented.qsf` (`MIF_FILE program.mif`). Compila el proyecto una vez.
+`instruction_memory.v` inicializa la memoria con `$readmemh("program.hex")`.
+Quartus respeta ese init en sintesis (la implementa como ROM/logica con esos
+valores), igual que la font_rom de la VGA. Es el camino probado del monociclo.
+
+> Nota: se intento usar `(* ram_init_file = "program.mif" *)` sin `$readmemh`,
+> pero como la lectura es **asincrona** Quartus implementa la memoria como
+> logica e **ignora** `ram_init_file` (warning "object mem used but never
+> assigned"): el programa quedaba vacio y la CPU se detenia al instante. Por eso
+> se usa `$readmemh`. El `.mif` se sigue generando para el flujo del In-System
+> Memory Content Editor (Opcion B).
 
 ## 3. Cambiar el programa SIN recompilar el HDL
 

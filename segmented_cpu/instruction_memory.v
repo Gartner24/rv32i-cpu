@@ -3,19 +3,15 @@
 // Lectura combinacional: la instruccion esta disponible en el mismo ciclo.
 // La direccion llega en bytes; addr[1:0] se descarta (acceso a palabra).
 //
-// Carga del programa "desde afuera" (no horneado en el HDL):
-//   - SIMULACION (`define SIMULATION, ver Makefile -DSIMULATION): se inicializa
-//     con $readmemh(HEX_FILE) para que los testbenches elijan el programa con
-//     defparam dut.u_imem.HEX_FILE.
-//   - SINTESIS (Quartus, sin SIMULATION): la RAM on-chip se inicializa desde
-//     program.mif (atributo ram_init_file). Para cambiar el programa NO se
-//     recompila el HDL: se regenera program.mif (assembler) y se actualiza con
-//     "Update Memory Initialization File" + Assembler, o se edita en vivo por
-//     JTAG con el In-System Memory Content Editor. Ver docs/program-loading.md.
+// El programa se inicializa con $readmemh(HEX_FILE). Quartus respeta este init
+// tambien en sintesis (la memoria se implementa como logica/ROM con esos
+// valores constantes), igual que la font_rom de la VGA. En simulacion los
+// testbenches eligen el programa con `defparam dut.u_instruction_memory.HEX_FILE`.
 //
-// Si en la placa el atributo ram_init_file diera problemas, definir SIMULATION
-// tambien en sintesis hace que vuelva a $readmemh(program.hex) (camino probado
-// del monociclo).
+// Carga "desde afuera": el assembler tambien genera program.mif. Para cambiar
+// el programa sin recompilar el HDL se usa el In-System Memory Content Editor
+// (requiere implementar esta memoria como IP de RAM con el flag de edicion
+// in-system) o "Update MIF" + Assembler. Ver docs/program-loading.md.
 // =============================================================================
 module instruction_memory #(
     parameter HEX_FILE  = "program.hex",
@@ -25,14 +21,11 @@ module instruction_memory #(
     output [31:0] instr   // instruccion de 32 bits
 );
 
-`ifdef SIMULATION
 reg [31:0] mem [0:MEM_DEPTH-1];
+
 initial begin
     $readmemh(HEX_FILE, mem);
 end
-`else
-(* ram_init_file = "program.mif" *) reg [31:0] mem [0:MEM_DEPTH-1];
-`endif
 
 assign instr = mem[addr[31:2]];
 
