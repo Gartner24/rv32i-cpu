@@ -72,27 +72,27 @@ reg halted;
 wire cpu_en = SW[0] ? (step_pulse && ~halted) : ~halted;
 
 // =====================================================================
-//  Registros de pipeline
+//  Registros de pipeline (modulos pipe_*; salidas cableadas aqui)
 // =====================================================================
 // IF/ID
-reg [31:0] IFID_pc, IFID_pc4, IFID_instr;
-reg        IFID_valid;
+wire [31:0] IFID_pc, IFID_pc4, IFID_instr;
+wire        IFID_valid;
 // ID/EX
-reg [31:0] IDEX_pc, IDEX_pc4, IDEX_instr, IDEX_imm, IDEX_rdata1, IDEX_rdata2;
-reg        IDEX_valid;
-reg        IDEX_reg_write, IDEX_alu_src, IDEX_alu_a_src, IDEX_mem_write,
-           IDEX_mem_read, IDEX_mem_to_reg, IDEX_branch, IDEX_jal, IDEX_jalr;
-reg [1:0]  IDEX_alu_op;
+wire [31:0] IDEX_pc, IDEX_pc4, IDEX_instr, IDEX_imm, IDEX_rdata1, IDEX_rdata2;
+wire        IDEX_valid;
+wire        IDEX_reg_write, IDEX_alu_src, IDEX_alu_a_src, IDEX_mem_write,
+            IDEX_mem_read, IDEX_mem_to_reg, IDEX_branch, IDEX_jal, IDEX_jalr;
+wire [1:0]  IDEX_alu_op;
 // EX/MEM
-reg [31:0] EXMEM_alu_result, EXMEM_store_data, EXMEM_pc4, EXMEM_instr;
-reg [31:0] EXMEM_branch_target;
-reg        EXMEM_valid;
-reg        EXMEM_reg_write, EXMEM_mem_write, EXMEM_mem_read, EXMEM_mem_to_reg,
-           EXMEM_jal, EXMEM_jalr, EXMEM_pc_src;
+wire [31:0] EXMEM_alu_result, EXMEM_store_data, EXMEM_pc4, EXMEM_instr;
+wire [31:0] EXMEM_branch_target;
+wire        EXMEM_valid;
+wire        EXMEM_reg_write, EXMEM_mem_write, EXMEM_mem_read, EXMEM_mem_to_reg,
+            EXMEM_jal, EXMEM_jalr, EXMEM_pc_src;
 // MEM/WB
-reg [31:0] MEMWB_alu_result, MEMWB_mem_data, MEMWB_pc4, MEMWB_instr;
-reg        MEMWB_valid;
-reg        MEMWB_reg_write, MEMWB_mem_to_reg, MEMWB_jal, MEMWB_jalr;
+wire [31:0] MEMWB_alu_result, MEMWB_mem_data, MEMWB_pc4, MEMWB_instr;
+wire        MEMWB_valid;
+wire        MEMWB_reg_write, MEMWB_mem_to_reg, MEMWB_jal, MEMWB_jalr;
 
 
 // =====================================================================
@@ -251,111 +251,68 @@ data_memory u_dmem (
 );
 
 // =====================================================================
-//  Registros de pipeline: avance, escrituras arquitectonicas, halt
+//  Registros de pipeline (modulos discretos, como los bloques del diagrama)
 // =====================================================================
+pipe_ifid u_ifid (
+    .clk(CLOCK_50), .rst(rst), .en(cpu_en),
+    .flush(flush), .stall(load_use_stall),
+    .in_pc(pc_out), .in_pc4(pc4_IF), .in_instr(instr_IF),
+    .pc(IFID_pc), .pc4(IFID_pc4), .instr(IFID_instr), .valid(IFID_valid)
+);
+
+pipe_idex u_idex (
+    .clk(CLOCK_50), .rst(rst), .en(cpu_en),
+    .bubble(flush | load_use_stall),
+    .in_valid(IFID_valid),
+    .in_pc(IFID_pc), .in_pc4(IFID_pc4), .in_instr(IFID_instr),
+    .in_imm(imm_ID), .in_rdata1(rdata1_ID), .in_rdata2(rdata2_ID),
+    .in_reg_write(c_reg_write), .in_alu_src(c_alu_src), .in_alu_a_src(c_alu_a_src),
+    .in_mem_write(c_mem_write), .in_mem_read(c_mem_read), .in_mem_to_reg(c_mem_to_reg),
+    .in_branch(c_branch), .in_jal(c_jal), .in_jalr(c_jalr), .in_alu_op(c_alu_op),
+    .pc(IDEX_pc), .pc4(IDEX_pc4), .instr(IDEX_instr), .imm(IDEX_imm),
+    .rdata1(IDEX_rdata1), .rdata2(IDEX_rdata2), .valid(IDEX_valid),
+    .reg_write(IDEX_reg_write), .alu_src(IDEX_alu_src), .alu_a_src(IDEX_alu_a_src),
+    .mem_write(IDEX_mem_write), .mem_read(IDEX_mem_read), .mem_to_reg(IDEX_mem_to_reg),
+    .branch(IDEX_branch), .jal(IDEX_jal), .jalr(IDEX_jalr), .alu_op(IDEX_alu_op)
+);
+
+pipe_exmem u_exmem (
+    .clk(CLOCK_50), .rst(rst), .en(cpu_en), .flush(flush),
+    .in_valid(IDEX_valid),
+    .in_alu_result(alu_result), .in_store_data(store_data_EX),
+    .in_pc4(IDEX_pc4), .in_instr(IDEX_instr),
+    .in_branch_target(branch_target_EX), .in_pc_src(pc_src_EX),
+    .in_reg_write(IDEX_reg_write), .in_mem_write(IDEX_mem_write),
+    .in_mem_read(IDEX_mem_read), .in_mem_to_reg(IDEX_mem_to_reg),
+    .in_jal(IDEX_jal), .in_jalr(IDEX_jalr),
+    .alu_result(EXMEM_alu_result), .store_data(EXMEM_store_data),
+    .pc4(EXMEM_pc4), .instr(EXMEM_instr),
+    .branch_target(EXMEM_branch_target), .pc_src(EXMEM_pc_src),
+    .valid(EXMEM_valid), .reg_write(EXMEM_reg_write), .mem_write(EXMEM_mem_write),
+    .mem_read(EXMEM_mem_read), .mem_to_reg(EXMEM_mem_to_reg),
+    .jal(EXMEM_jal), .jalr(EXMEM_jalr)
+);
+
+pipe_memwb u_memwb (
+    .clk(CLOCK_50), .rst(rst), .en(cpu_en),
+    .in_valid(EXMEM_valid),
+    .in_alu_result(EXMEM_alu_result), .in_mem_data(mem_data_MEM),
+    .in_pc4(EXMEM_pc4), .in_instr(EXMEM_instr),
+    .in_reg_write(EXMEM_reg_write), .in_mem_to_reg(EXMEM_mem_to_reg),
+    .in_jal(EXMEM_jal), .in_jalr(EXMEM_jalr),
+    .alu_result(MEMWB_alu_result), .mem_data(MEMWB_mem_data),
+    .pc4(MEMWB_pc4), .instr(MEMWB_instr), .valid(MEMWB_valid),
+    .reg_write(MEMWB_reg_write), .mem_to_reg(MEMWB_mem_to_reg),
+    .jal(MEMWB_jal), .jalr(MEMWB_jalr)
+);
+
+// Halt: se activa cuando un ebreak/instr-nula valido llega a WB.
 always @(posedge CLOCK_50 or posedge rst) begin
-    if (rst) begin
-        IFID_valid  <= 1'b0; IFID_instr <= NOP_INSTR; IFID_pc <= 32'b0; IFID_pc4 <= 32'b0;
-        IDEX_valid  <= 1'b0; IDEX_instr <= NOP_INSTR;
-        IDEX_reg_write <= 1'b0; IDEX_mem_write <= 1'b0;
-        EXMEM_valid <= 1'b0; EXMEM_instr <= NOP_INSTR;
-        EXMEM_reg_write <= 1'b0; EXMEM_mem_write <= 1'b0; EXMEM_pc_src <= 1'b0;
-        MEMWB_valid <= 1'b0; MEMWB_instr <= NOP_INSTR;
-        MEMWB_reg_write <= 1'b0;
-        halted      <= 1'b0;
-    end else if (cpu_en) begin
-        // IF -> IF/ID
-        //   flush (salto tomado): burbuja; stall (load-use): congelar (mantener)
-        if (flush) begin
-            IFID_valid <= 1'b0;
-            IFID_instr <= NOP_INSTR;
-        end else if (load_use_stall) begin
-            // mantener IF/ID sin cambios (la misma instruccion espera en ID)
-        end else begin
-            IFID_pc    <= pc_out;
-            IFID_pc4   <= pc4_IF;
-            IFID_instr <= instr_IF;
-            IFID_valid <= 1'b1;
-        end
-
-        // ID -> ID/EX
-        //   flush o stall: inyectar burbuja (instr nula, sin efectos)
-        if (flush || load_use_stall) begin
-            IDEX_valid     <= 1'b0;
-            IDEX_instr     <= NOP_INSTR;
-            IDEX_reg_write <= 1'b0;
-            IDEX_mem_write <= 1'b0;
-            IDEX_mem_read  <= 1'b0;
-            IDEX_mem_to_reg<= 1'b0;
-            IDEX_branch    <= 1'b0;
-            IDEX_jal       <= 1'b0;
-            IDEX_jalr      <= 1'b0;
-        end else begin
-            IDEX_pc        <= IFID_pc;
-            IDEX_pc4       <= IFID_pc4;
-            IDEX_instr     <= IFID_instr;
-            IDEX_imm       <= imm_ID;
-            IDEX_rdata1    <= rdata1_ID;
-            IDEX_rdata2    <= rdata2_ID;
-            IDEX_valid     <= IFID_valid;
-            IDEX_reg_write <= c_reg_write;
-            IDEX_alu_src   <= c_alu_src;
-            IDEX_alu_a_src <= c_alu_a_src;
-            IDEX_mem_write <= c_mem_write;
-            IDEX_mem_read  <= c_mem_read;
-            IDEX_mem_to_reg<= c_mem_to_reg;
-            IDEX_branch    <= c_branch;
-            IDEX_jal       <= c_jal;
-            IDEX_jalr      <= c_jalr;
-            IDEX_alu_op    <= c_alu_op;
-        end
-
-        // EX -> EX/MEM
-        //   flush: la instruccion joven en EX se descarta (burbuja); el salto
-        //   que provoco el flush ya esta en MEM y avanza a MEM/WB normalmente.
-        if (flush) begin
-            EXMEM_valid      <= 1'b0;
-            EXMEM_instr      <= NOP_INSTR;
-            EXMEM_reg_write  <= 1'b0;
-            EXMEM_mem_write  <= 1'b0;
-            EXMEM_mem_read   <= 1'b0;
-            EXMEM_mem_to_reg <= 1'b0;
-            EXMEM_jal        <= 1'b0;
-            EXMEM_jalr       <= 1'b0;
-            EXMEM_pc_src     <= 1'b0;
-        end else begin
-            EXMEM_alu_result    <= alu_result;
-            EXMEM_store_data    <= store_data_EX;
-            EXMEM_pc4           <= IDEX_pc4;
-            EXMEM_instr         <= IDEX_instr;
-            EXMEM_valid         <= IDEX_valid;
-            EXMEM_reg_write     <= IDEX_reg_write;
-            EXMEM_mem_write     <= IDEX_mem_write;
-            EXMEM_mem_read      <= IDEX_mem_read;
-            EXMEM_mem_to_reg    <= IDEX_mem_to_reg;
-            EXMEM_jal           <= IDEX_jal;
-            EXMEM_jalr          <= IDEX_jalr;
-            EXMEM_pc_src        <= pc_src_EX;
-            EXMEM_branch_target <= branch_target_EX;
-        end
-
-        // MEM -> MEM/WB
-        MEMWB_alu_result <= EXMEM_alu_result;
-        MEMWB_mem_data   <= mem_data_MEM;
-        MEMWB_pc4        <= EXMEM_pc4;
-        MEMWB_instr      <= EXMEM_instr;
-        MEMWB_valid      <= EXMEM_valid;
-        MEMWB_reg_write  <= EXMEM_reg_write;
-        MEMWB_mem_to_reg <= EXMEM_mem_to_reg;
-        MEMWB_jal        <= EXMEM_jal;
-        MEMWB_jalr       <= EXMEM_jalr;
-
-        // WB: la escritura al banco de registros vive en register_file.v
-
-        // halt cuando un ebreak/instr-nula valido llega a WB
-        if (MEMWB_valid && (MEMWB_instr == EBREAK_INSTR || MEMWB_instr == 32'h00000000))
-            halted <= 1'b1;
-    end
+    if (rst)
+        halted <= 1'b0;
+    else if (cpu_en && MEMWB_valid &&
+             (MEMWB_instr == EBREAK_INSTR || MEMWB_instr == 32'h00000000))
+        halted <= 1'b1;
 end
 
 // =====================================================================

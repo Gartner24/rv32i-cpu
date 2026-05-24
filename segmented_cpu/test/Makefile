@@ -58,6 +58,8 @@ TOP_SRCS := $(SRC)/mux2to1.v $(SRC)/adder.v $(SRC)/alu.v $(SRC)/imm_gen.v \
             $(SRC)/instruction_memory.v $(SRC)/data_memory.v $(SRC)/pc.v \
             $(SRC)/hex_display.v $(SRC)/clock_div.v $(SRC)/vga_controller.v \
             $(SRC)/forwarding_unit.v $(SRC)/hazard_unit.v \
+            $(SRC)/pipe_ifid.v $(SRC)/pipe_idex.v \
+            $(SRC)/pipe_exmem.v $(SRC)/pipe_memwb.v \
             $(SRC)/vga_debug.v $(SRC)/top.v
 
 test_top: waves font128.hex top_tb.v program.hex $(TOP_SRCS)

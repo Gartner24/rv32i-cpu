@@ -48,6 +48,10 @@ set_global_assignment -name VERILOG_FILE clock_div.v
 set_global_assignment -name VERILOG_FILE vga_controller.v
 set_global_assignment -name VERILOG_FILE forwarding_unit.v
 set_global_assignment -name VERILOG_FILE hazard_unit.v
+set_global_assignment -name VERILOG_FILE pipe_ifid.v
+set_global_assignment -name VERILOG_FILE pipe_idex.v
+set_global_assignment -name VERILOG_FILE pipe_exmem.v
+set_global_assignment -name VERILOG_FILE pipe_memwb.v
 set_global_assignment -name VERILOG_FILE vga_debug.v
 set_global_assignment -name VERILOG_FILE top.v
 
