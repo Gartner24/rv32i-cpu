@@ -52,9 +52,10 @@ initial begin
     if (dut.u_pc.pc_out !== 32'h0)
         begin $display("FAIL: reset PC expected 0 got %0h", dut.u_pc.pc_out); errors = errors+1; end
 
-    // Free-run for 8 cycles (5 instructions + margin)
+    // Free-run: 5-stage pipeline needs ~9 cycles for the last instruction (lw)
+    // to reach WB (4-stage fill + 5 instructions). 12 gives margin.
     KEY[0] = 1;
-    wait_cycles(8);
+    wait_cycles(12);
     #1;
 
     if (dut.regs[1] !== 32'd5)

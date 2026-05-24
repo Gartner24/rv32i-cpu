@@ -120,7 +120,11 @@ wire [31:0] branch_target;
 
 // freno de fetch al ver ebreak/nula (no busca mas alla del fin del programa)
 wire        ebreak_IF = (instr_IF == EBREAK_INSTR) || (instr_IF == 32'h00000000);
-wire        pc_en     = cpu_en & ~ebreak_IF;
+
+// control de riesgos: stall por load-use, flush por salto tomado en EX
+wire        load_use_stall;          // de hazard_unit (instanciada abajo)
+wire        flush = pc_src;          // salto/branch tomado resuelto en EX
+wire        pc_en = cpu_en & ~load_use_stall & ~ebreak_IF;
 
 assign pc_next = pc_src ? branch_target : pc4_IF;
 
@@ -178,6 +182,14 @@ forwarding_unit u_fwd (
     .mem_reg_write(EXMEM_reg_write), .mem_rd(EXMEM_instr[11:7]),
     .wb_reg_write(MEMWB_reg_write),  .wb_rd(MEMWB_instr[11:7]),
     .forward_a(forward_a), .forward_b(forward_b)
+);
+
+// Deteccion de riesgo load-use (carga en EX cuyo destino lee la instr en ID)
+hazard_unit u_hzd (
+    .idex_valid(IDEX_valid), .idex_mem_read(IDEX_mem_read),
+    .idex_rd(IDEX_instr[11:7]),
+    .ifid_rs1(IFID_instr[19:15]), .ifid_rs2(IFID_instr[24:20]),
+    .load_use_stall(load_use_stall)
 );
 
 // Valor adelantado desde EX/MEM: para JAL/JALR es PC+4, no el resultado de ALU.
@@ -254,29 +266,50 @@ always @(posedge CLOCK_50 or posedge rst) begin
         for (ri = 0; ri < 32; ri = ri + 1) regs[ri] <= 32'b0;
     end else if (cpu_en) begin
         // IF -> IF/ID
-        IFID_pc    <= pc_out;
-        IFID_pc4   <= pc4_IF;
-        IFID_instr <= instr_IF;
-        IFID_valid <= 1'b1;
+        //   flush (salto tomado): burbuja; stall (load-use): congelar (mantener)
+        if (flush) begin
+            IFID_valid <= 1'b0;
+            IFID_instr <= NOP_INSTR;
+        end else if (load_use_stall) begin
+            // mantener IF/ID sin cambios (la misma instruccion espera en ID)
+        end else begin
+            IFID_pc    <= pc_out;
+            IFID_pc4   <= pc4_IF;
+            IFID_instr <= instr_IF;
+            IFID_valid <= 1'b1;
+        end
 
         // ID -> ID/EX
-        IDEX_pc        <= IFID_pc;
-        IDEX_pc4       <= IFID_pc4;
-        IDEX_instr     <= IFID_instr;
-        IDEX_imm       <= imm_ID;
-        IDEX_rdata1    <= rdata1_ID;
-        IDEX_rdata2    <= rdata2_ID;
-        IDEX_valid     <= IFID_valid;
-        IDEX_reg_write <= c_reg_write;
-        IDEX_alu_src   <= c_alu_src;
-        IDEX_alu_a_src <= c_alu_a_src;
-        IDEX_mem_write <= c_mem_write;
-        IDEX_mem_read  <= c_mem_read;
-        IDEX_mem_to_reg<= c_mem_to_reg;
-        IDEX_branch    <= c_branch;
-        IDEX_jal       <= c_jal;
-        IDEX_jalr      <= c_jalr;
-        IDEX_alu_op    <= c_alu_op;
+        //   flush o stall: inyectar burbuja (instr nula, sin efectos)
+        if (flush || load_use_stall) begin
+            IDEX_valid     <= 1'b0;
+            IDEX_instr     <= NOP_INSTR;
+            IDEX_reg_write <= 1'b0;
+            IDEX_mem_write <= 1'b0;
+            IDEX_mem_read  <= 1'b0;
+            IDEX_mem_to_reg<= 1'b0;
+            IDEX_branch    <= 1'b0;
+            IDEX_jal       <= 1'b0;
+            IDEX_jalr      <= 1'b0;
+        end else begin
+            IDEX_pc        <= IFID_pc;
+            IDEX_pc4       <= IFID_pc4;
+            IDEX_instr     <= IFID_instr;
+            IDEX_imm       <= imm_ID;
+            IDEX_rdata1    <= rdata1_ID;
+            IDEX_rdata2    <= rdata2_ID;
+            IDEX_valid     <= IFID_valid;
+            IDEX_reg_write <= c_reg_write;
+            IDEX_alu_src   <= c_alu_src;
+            IDEX_alu_a_src <= c_alu_a_src;
+            IDEX_mem_write <= c_mem_write;
+            IDEX_mem_read  <= c_mem_read;
+            IDEX_mem_to_reg<= c_mem_to_reg;
+            IDEX_branch    <= c_branch;
+            IDEX_jal       <= c_jal;
+            IDEX_jalr      <= c_jalr;
+            IDEX_alu_op    <= c_alu_op;
+        end
 
         // EX -> EX/MEM
         EXMEM_alu_result <= alu_result;
