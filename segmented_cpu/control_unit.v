@@ -19,6 +19,7 @@ module control_unit (
     output reg reg_write,   // habilita escritura en register file
     output reg alu_src,     // 0 = rs2, 1 = inmediato
     output reg alu_a_src,   // 0 = rs1, 1 = PC (para AUIPC)
+    output reg alu_a_zero,  // 1 = fuerza operando A = 0 (para LUI: rd = imm<<12)
     output reg mem_write,   // habilita escritura en data memory
     output reg mem_read,    // habilita lectura de data memory
     output reg mem_to_reg,  // 0 = ALU result, 1 = dato de memoria
@@ -39,6 +40,8 @@ localparam JAL = 7'b1101111;
 localparam JALR = 7'b1100111;
 
 always @(*) begin
+    // Por defecto el operando A NO se fuerza a 0; solo LUI lo activa abajo.
+    alu_a_zero = 1'b0;
     case (opcode)
         R_TYPE: begin  // R-type
             reg_write  = 1;
@@ -100,10 +103,12 @@ always @(*) begin
             jalr       = 0;
             alu_op     = 2'b01;
         end
-        LUI: begin  // LUI
+        LUI: begin  // LUI: rd = imm<<12. Operando A forzado a 0 (el campo rs1
+                    // de LUI son bits del inmediato, NO un registro valido).
             reg_write  = 1;
             alu_src    = 1;
-            alu_a_src  = 0;  // rs1 = x0 implícito, siempre 0
+            alu_a_src  = 0;
+            alu_a_zero = 1;  // operando A = 0  ->  ALU hace 0 + imm = imm<<12
             mem_write  = 0;
             mem_read   = 0;
             mem_to_reg = 0;

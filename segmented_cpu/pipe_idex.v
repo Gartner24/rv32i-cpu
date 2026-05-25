@@ -20,6 +20,7 @@ module pipe_idex (
     input             in_ctrl_reg_write,
     input             in_ctrl_alu_src,
     input             in_ctrl_alu_a_src,
+    input             in_ctrl_alu_a_zero,
     input             in_ctrl_mem_write,
     input             in_ctrl_mem_read,
     input             in_ctrl_mem_to_reg,
@@ -37,6 +38,7 @@ module pipe_idex (
     output reg        ctrl_reg_write,
     output reg        ctrl_alu_src,
     output reg        ctrl_alu_a_src,
+    output reg        ctrl_alu_a_zero,
     output reg        ctrl_mem_write,
     output reg        ctrl_mem_read,
     output reg        ctrl_mem_to_reg,
@@ -62,7 +64,8 @@ always @(posedge clk or posedge rst) begin
             imm <= in_imm; rs1_data <= in_rs1_data; rs2_data <= in_rs2_data;
             valid <= in_valid;
             ctrl_reg_write <= in_ctrl_reg_write; ctrl_alu_src <= in_ctrl_alu_src;
-            ctrl_alu_a_src <= in_ctrl_alu_a_src; ctrl_mem_write <= in_ctrl_mem_write;
+            ctrl_alu_a_src <= in_ctrl_alu_a_src; ctrl_alu_a_zero <= in_ctrl_alu_a_zero;
+            ctrl_mem_write <= in_ctrl_mem_write;
             ctrl_mem_read <= in_ctrl_mem_read; ctrl_mem_to_reg <= in_ctrl_mem_to_reg;
             ctrl_branch <= in_ctrl_branch; ctrl_jal <= in_ctrl_jal; ctrl_jalr <= in_ctrl_jalr;
             ctrl_alu_op <= in_ctrl_alu_op;

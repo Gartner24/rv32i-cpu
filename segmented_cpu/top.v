@@ -85,6 +85,7 @@ wire [31:0] id_ex_pc, id_ex_pc_plus_4, id_ex_instruction, id_ex_imm,
             id_ex_rs1_data, id_ex_rs2_data;
 wire        id_ex_valid;
 wire        id_ex_ctrl_reg_write, id_ex_ctrl_alu_src, id_ex_ctrl_alu_a_src,
+            id_ex_ctrl_alu_a_zero,
             id_ex_ctrl_mem_write, id_ex_ctrl_mem_read, id_ex_ctrl_mem_to_reg,
             id_ex_ctrl_branch, id_ex_ctrl_jal, id_ex_ctrl_jalr;
 wire [1:0]  id_ex_ctrl_alu_op;
@@ -152,13 +153,15 @@ wire [4:0]  rs1 = if_id_instruction[19:15];
 wire [4:0]  rs2 = if_id_instruction[24:20];
 wire [31:0] rs1_data, rs2_data, imm;
 
-wire        ctrl_reg_write, ctrl_alu_src, ctrl_alu_a_src, ctrl_mem_write,
-            ctrl_mem_read, ctrl_mem_to_reg, ctrl_branch, ctrl_jal, ctrl_jalr;
+wire        ctrl_reg_write, ctrl_alu_src, ctrl_alu_a_src, ctrl_alu_a_zero,
+            ctrl_mem_write, ctrl_mem_read, ctrl_mem_to_reg,
+            ctrl_branch, ctrl_jal, ctrl_jalr;
 wire [1:0]  ctrl_alu_op;
 
 control_unit u_control_unit (
     .opcode(if_id_instruction[6:0]),
     .reg_write(ctrl_reg_write), .alu_src(ctrl_alu_src), .alu_a_src(ctrl_alu_a_src),
+    .alu_a_zero(ctrl_alu_a_zero),
     .mem_write(ctrl_mem_write), .mem_read(ctrl_mem_read), .mem_to_reg(ctrl_mem_to_reg),
     .branch(ctrl_branch), .jal(ctrl_jal), .jalr(ctrl_jalr), .alu_op(ctrl_alu_op)
 );
@@ -212,7 +215,8 @@ wire [31:0] rs1_forwarded = (forward_a == 2'b10) ? ex_mem_forward_value :
 wire [31:0] rs2_forwarded = (forward_b == 2'b10) ? ex_mem_forward_value :
                             (forward_b == 2'b01) ? write_back_data      : id_ex_rs2_data;
 
-wire [31:0] alu_operand_a = id_ex_ctrl_alu_a_src ? id_ex_pc  : rs1_forwarded;
+wire [31:0] alu_operand_a = id_ex_ctrl_alu_a_zero ? 32'b0    :
+                            id_ex_ctrl_alu_a_src  ? id_ex_pc : rs1_forwarded;
 wire [31:0] alu_operand_b = id_ex_ctrl_alu_src   ? id_ex_imm : rs2_forwarded;
 
 wire [3:0]  alu_control;
@@ -286,7 +290,8 @@ pipe_idex u_id_ex (
     .in_pc(if_id_pc), .in_pc_plus_4(if_id_pc_plus_4), .in_instruction(if_id_instruction),
     .in_imm(imm), .in_rs1_data(rs1_data), .in_rs2_data(rs2_data),
     .in_ctrl_reg_write(ctrl_reg_write), .in_ctrl_alu_src(ctrl_alu_src),
-    .in_ctrl_alu_a_src(ctrl_alu_a_src), .in_ctrl_mem_write(ctrl_mem_write),
+    .in_ctrl_alu_a_src(ctrl_alu_a_src), .in_ctrl_alu_a_zero(ctrl_alu_a_zero),
+    .in_ctrl_mem_write(ctrl_mem_write),
     .in_ctrl_mem_read(ctrl_mem_read), .in_ctrl_mem_to_reg(ctrl_mem_to_reg),
     .in_ctrl_branch(ctrl_branch), .in_ctrl_jal(ctrl_jal), .in_ctrl_jalr(ctrl_jalr),
     .in_ctrl_alu_op(ctrl_alu_op),
@@ -294,7 +299,8 @@ pipe_idex u_id_ex (
     .imm(id_ex_imm), .rs1_data(id_ex_rs1_data), .rs2_data(id_ex_rs2_data),
     .valid(id_ex_valid),
     .ctrl_reg_write(id_ex_ctrl_reg_write), .ctrl_alu_src(id_ex_ctrl_alu_src),
-    .ctrl_alu_a_src(id_ex_ctrl_alu_a_src), .ctrl_mem_write(id_ex_ctrl_mem_write),
+    .ctrl_alu_a_src(id_ex_ctrl_alu_a_src), .ctrl_alu_a_zero(id_ex_ctrl_alu_a_zero),
+    .ctrl_mem_write(id_ex_ctrl_mem_write),
     .ctrl_mem_read(id_ex_ctrl_mem_read), .ctrl_mem_to_reg(id_ex_ctrl_mem_to_reg),
     .ctrl_branch(id_ex_ctrl_branch), .ctrl_jal(id_ex_ctrl_jal),
     .ctrl_jalr(id_ex_ctrl_jalr), .ctrl_alu_op(id_ex_ctrl_alu_op)

@@ -75,6 +75,9 @@ test_pipe_forward: waves font128.hex pipe_forward_tb.v pipe_forward.hex $(TOP_SR
 test_pipe_hazard: waves font128.hex pipe_hazard_tb.v pipe_hazard.hex $(TOP_SRCS)
 	@$(IV) -o waves/pipe_hazard_tb.vvp pipe_hazard_tb.v $(TOP_SRCS) && $(VVP) waves/pipe_hazard_tb.vvp
 
+test_pipe_lui: waves font128.hex pipe_lui_tb.v pipe_lui.hex $(TOP_SRCS)
+	@$(IV) -o waves/pipe_lui_tb.vvp pipe_lui_tb.v $(TOP_SRCS) && $(VVP) waves/pipe_lui_tb.vvp
+
 # ---------- programas reales del ensamblador (../../assembler/*.hex) ----------
 # Cada uno corre hasta halt y verifica x10==0 (main devuelve 0 si todo pasa).
 ASM := ../../assembler
@@ -101,7 +104,7 @@ test_newfinal: waves font128.hex program_test_tb.v $(TOP_SRCS)
 
 # Corre todos los programas reales y los testbenches de pipeline.
 programs: test_arith test_bits test_loops test_memory test_newfinal \
-          test_pipe_smoke test_pipe_forward test_pipe_hazard
+          test_pipe_smoke test_pipe_forward test_pipe_hazard test_pipe_lui
 	@echo ""
 	@echo "--- All program tests complete ---"
 
