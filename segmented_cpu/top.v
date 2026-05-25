@@ -252,7 +252,9 @@ end
 // Decision de salto calculada en EX; se latchea en EX/MEM y se actua en MEM.
 wire        branch_taken     = id_ex_valid & id_ex_ctrl_branch & branch_condition;
 wire        pc_src_ex        = branch_taken | (id_ex_valid & (id_ex_ctrl_jal | id_ex_ctrl_jalr));
-wire [31:0] branch_target_ex = id_ex_ctrl_jalr ? alu_result : branch_target_pcrel;
+// JALR: RV32I exige (rs1+imm) con el bit 0 forzado a 0.
+wire [31:0] branch_target_ex = id_ex_ctrl_jalr ? {alu_result[31:1], 1'b0}
+                                               : branch_target_pcrel;
 
 // dato a almacenar (store), con forwarding aplicado
 wire [31:0] store_data_ex = rs2_forwarded;
