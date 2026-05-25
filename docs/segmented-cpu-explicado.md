@@ -46,8 +46,73 @@ instr D:                     IF    ID    EX    MEM   WB
 ```
 
 A partir del ciclo 5 se retira una instruccion por ciclo (el pipeline esta
-"lleno"). Eso permite subir la frecuencia de reloj: el ciclo solo tiene que durar
-lo que tarda **una etapa**, no la instruccion completa.
+"lleno").
+
+### Por que esto permite un reloj mas rapido
+
+Esta es la idea mas importante, asi que vamos despacio.
+
+**Que es el periodo de reloj.** El reloj de una CPU es una senal que sube y baja
+sin parar. Los flip-flops (registros) solo guardan datos en el flanco de subida.
+El tiempo entre un flanco y el siguiente es el **periodo** (T). La **frecuencia**
+es cuantos flancos hay por segundo: `frecuencia = 1 / T`. Si T = 20 ns, entonces
+hay 1/20ns = 50,000,000 flancos por segundo = **50 MHz**. Periodo mas corto =
+frecuencia mas alta = mas operaciones por segundo.
+
+**La regla de oro del periodo.** Entre dos flancos, las senales tienen que viajar
+por la logica combinacional (sumadores, ALU, memorias, muxes...) y **llegar
+estables** a la entrada del siguiente registro antes del proximo flanco. Si el
+flanco llega antes de que la senal se estabilice, el registro guarda basura. Por
+lo tanto:
+
+```
+periodo de reloj >= retardo del camino combinacional mas largo
+```
+
+El camino combinacional mas largo se llama **camino critico**. El reloj no puede
+ir mas rapido que su camino critico.
+
+**El problema del monociclo.** En una CPU monociclo, UNA instruccion recorre
+TODO el camino en un solo ciclo: leer la instruccion + decodificar + ALU +
+acceder a memoria + escribir el registro. Supongamos (numeros de ejemplo) que
+cada parte tarda:
+
+```
+IF = 2 ns,  ID = 1 ns,  EX = 2 ns,  MEM = 2 ns,  WB = 1 ns
+```
+
+En el monociclo, el camino critico es la **suma de todo**: 2+1+2+2+1 = **8 ns**.
+El periodo tiene que ser >= 8 ns, asi que la frecuencia maxima es 1/8ns = 125 MHz.
+Una instruccion tarda 8 ns, y el reloj no puede ir mas rapido que eso.
+
+**Que cambia al segmentar.** Al partir el trabajo en 5 etapas con un registro de
+pipeline entre cada una, ahora **entre flanco y flanco una senal solo tiene que
+cruzar UNA etapa**, no las cinco. El camino critico ya no es la suma, sino la
+**etapa mas lenta**:
+
+```
+camino critico segmentado = max(2, 1, 2, 2, 1) = 2 ns
+```
+
+Asi que el periodo puede bajar a ~2 ns y la frecuencia subir a ~500 MHz: el reloj
+late mucho mas rapido porque en cada latido solo pide cruzar una etapa.
+
+**El resultado.** Aunque una instruccion individual sigue tardando 5 ciclos en
+cruzar el pipeline (su *latencia* no mejora, incluso empeora un poco por los
+registros intermedios), como el reloj es mucho mas rapido Y sale una instruccion
+por ciclo cuando el pipeline esta lleno, el *rendimiento total* (instrucciones
+por segundo) sube muchisimo. En el ejemplo: el monociclo hace 1 instruccion cada
+8 ns; el segmentado, una vez lleno, hace 1 instruccion cada 2 ns. ~4x mas
+trabajo por segundo con el mismo hardware de calculo, solo reorganizado.
+
+> Idea en una frase: segmentar no hace que una instruccion termine antes; hace
+> que el reloj pueda ir mas rapido (porque cada ciclo solo cruza una etapa) y que
+> salga una instruccion por ciclo, asi que se terminan muchas mas por segundo.
+
+(En la DE1-SoC el reloj es fijo de 50 MHz / 20 ns, asi que no "subimos" la
+frecuencia; pero el principio es el mismo: cada etapa es corta y holgada dentro
+de esos 20 ns. De hecho el camino critico real de esta CPU es de ~10 ns, comodo
+dentro del periodo de 20 ns.)
 
 ## 1.2. Las 5 etapas
 
@@ -71,80 +136,179 @@ lo que tarda **una etapa**, no la instruccion completa.
 - **WB (Write-Back):** se escribe el resultado (de la ALU o de memoria) en el
   registro destino `rd`.
 
-## 1.3. Los registros de pipeline
+## 1.3. Los registros de pipeline (las "paredes" entre etapas)
 
-Entre una etapa y la siguiente hay un **registro de pipeline**: un banco de
-flip-flops que captura, en cada flanco de reloj, todo lo que la etapa produjo,
-para que la siguiente etapa lo use el ciclo siguiente. Son 4:
+Antes de nada, dos palabras que vas a oir mucho:
+
+- **Flip-flop (o registro):** una celdita de memoria diminuta hecha de
+  transistores que guarda unos bits. Lo especial es **cuando** cambia: solo en el
+  instante del flanco del reloj (el "tic"). Entre un tic y el siguiente, mantiene
+  congelado lo que tenia guardado, pase lo que pase en su entrada. Un "registro"
+  de 32 bits es simplemente 32 flip-flops uno al lado del otro.
+- **Capturar (o "latchear"):** en el tic del reloj, el registro le saca una
+  *foto* a lo que hay en su entrada y la guarda en su salida hasta el proximo tic.
+
+Ahora, **que es un registro de pipeline.** Entre cada par de etapas
+(IF-ID, ID-EX, EX-MEM, MEM-WB) ponemos uno de estos registros. Hay 4:
 
 ```
  IF -> [IF/ID] -> ID -> [ID/EX] -> EX -> [EX/MEM] -> MEM -> [MEM/WB] -> WB
 ```
 
-Son imprescindibles: sin ellos, lo que calcula una etapa se perderia o se
-mezclaria con la instruccion siguiente. Cada registro de pipeline lleva **todo
-lo que las etapas posteriores van a necesitar** de esa instruccion: su PC, la
-propia instruccion, los datos leidos, el inmediato y **todas las senales de
-control** que decidira mas adelante.
+**Para que sirven (la analogia de la bandeja).** Volvamos a la linea de montaje.
+Entre un trabajador y el siguiente hay una **bandeja**. Cuando suena la campana
+(el tic del reloj), cada trabajador deja su trabajo a medias en la bandeja para
+el de adelante, y a la vez recoge la bandeja del de atras. Esa bandeja es el
+registro de pipeline: congela el trabajo a medias de cada etapa para que la
+etapa siguiente lo recoja con calma el ciclo que viene.
 
-Un detalle clave: las senales de control se generan una sola vez en ID y luego
-**viajan con la instruccion** por los registros de pipeline hasta la etapa donde
-se usan (por ejemplo, `mem_write` se genera en ID pero se usa en MEM, asi que
-viaja ID/EX -> EX/MEM y ahi se usa).
+**Por que son imprescindibles.** La logica de cada etapa (sumadores, ALU, etc.)
+es combinacional: si conectaramos la salida de EX directo a la entrada de MEM sin
+bandeja, en cuanto EX empezara a procesar la instruccion *siguiente*, los valores
+de MEM cambiarian de golpe y se mezclaria todo. El registro de pipeline pone una
+"pared": guarda la foto del ciclo y aisla una instruccion de otra.
 
-## 1.4. Latencia y throughput
+**Que guarda cada bandeja.** Todo lo que las etapas de mas adelante van a
+necesitar de esa instruccion: su PC, la instruccion misma, los datos que se
+leyeron de los registros, el inmediato y **todas las senales de control**.
 
-- **Latencia:** lo que tarda UNA instruccion en cruzar el pipeline = 5 ciclos.
-- **Throughput:** instrucciones terminadas por ciclo. Ideal = 1/ciclo.
+**Las senales de control viajan con la instruccion.** Las senales que dicen "esto
+escribe memoria", "esto escribe un registro", etc., se calculan UNA sola vez (en
+ID) y despues *viajan dentro de las bandejas* hasta la etapa donde se usan.
+Ejemplo concreto: `mem_write` (escribir en memoria) se genera en ID, pero la
+escritura en memoria pasa en MEM. Asi que `mem_write` viaja ID/EX -> EX/MEM y
+recien ahi, en MEM, se usa. Es como ponerle a la pieza una etiqueta con
+instrucciones que la acompana por toda la linea.
 
-En la DE1-SoC el reloj es de 50 MHz, es decir un ciclo dura **20 ns**. Si un
-programa tarda N ciclos, el tiempo real es N x 20 ns. (Por eso los reportes de
-los tests muestran, por ejemplo, "640 ciclos = 12800 ns".)
+**El bit `valid`.** Cada bandeja lleva ademas un bit que dice "aqui hay una
+instruccion de verdad" (`valid=1`) o "aqui no hay nada util" (`valid=0`). Ese
+bit es la base de las **burbujas** (lo vemos en 1.5).
 
-El throughput ideal no se alcanza siempre, porque hay **riesgos**.
+## 1.4. Latencia y throughput (rapidez de UNO vs. cuantos por segundo)
 
-## 1.5. Los riesgos (hazards)
+Primero, **ciclo**: el tiempo entre dos tics del reloj. En la DE1-SoC dura
+**20 ns** (porque el reloj es de 50 MHz). Todo el pipeline avanza un pasito en
+cada ciclo.
 
-Tener varias instrucciones en vuelo crea conflictos. Hay tres tipos:
+Hay dos formas de medir "rapidez", y se confunden mucho:
 
-### Riesgo de datos (RAW: Read After Write)
-Una instruccion necesita un resultado que otra mas vieja **todavia no escribio**.
+- **Latencia** = cuanto tarda **UNA** instruccion de principio a fin. En este
+  pipeline, una instruccion entra por IF y sale por WB despues de **5 ciclos**.
+  Esa es su latencia: 5 ciclos.
+- **Throughput** (rendimiento, o "caudal") = **cuantas** instrucciones terminas
+  por unidad de tiempo. Cuando el pipeline esta lleno, sale **1 instruccion por
+  ciclo**.
+
+**Analogia del lavadero de autos.** Un auto tarda, digamos, 10 minutos en pasar
+por las 5 estaciones del lavadero (mojar, enjabonar, cepillar, enjuagar, secar).
+Esa es la *latencia*: 10 minutos por auto, siempre. Pero como hay un auto en cada
+estacion a la vez, **sale un auto terminado cada 2 minutos**. Ese es el
+*throughput*. Si te preguntan "cuanto tarda lavar un auto" la respuesta es 10
+min (latencia); si te preguntan "cuantos autos lavas por hora" la respuesta sale
+del throughput (uno cada 2 min = 30 por hora).
+
+Lo mismo aqui: segmentar **no baja la latencia** de una instruccion (sigue
+tardando sus 5 ciclos, incluso un poquito mas por las bandejas). Lo que mejora
+brutalmente es el **throughput**: casi una instruccion terminada por ciclo.
+
+Cuenta practica: si un programa tarda **N ciclos**, el tiempo real es
+**N x 20 ns**. Por eso los reportes dicen, por ejemplo, "640 ciclos = 12800 ns".
+
+El throughput ideal (1 por ciclo) **no siempre se logra**, porque aparecen los
+**riesgos**, que es justo lo que sigue.
+
+## 1.5. Los riesgos (hazards): los problemas de tener varias a la vez
+
+**Hazard** es simplemente la palabra en ingles para "riesgo" o "peligro". Aqui
+significa: *una situacion en la que tener varias instrucciones en vuelo a la vez
+podria dar un resultado incorrecto si no hacemos algo*. Hay tres tipos. Para cada
+uno hay un nombre del problema y un nombre de la solucion; los explico en
+cristiano.
+
+### A) Riesgo de datos: "necesito un numero que todavia no esta listo"
+
+Tambien se le dice **RAW** (de "Read After Write": leer despues de escribir). El
+problema: una instruccion quiere usar un registro que una instruccion anterior
+**todavia no termino de escribir**.
 
 ```
-add x3, x1, x2     # escribe x3 (en WB, varios ciclos despues)
-sub x4, x3, x5     # necesita x3 YA, en EX
+add x3, x1, x2     # calcula x3 = x1 + x2 (escribe x3 al final, en WB)
+sub x4, x3, x5     # quiere usar x3 YA, en su etapa EX
 ```
 
-El `sub` llega a EX cuando el `add` apenas esta en MEM: x3 aun no esta en el
-banco de registros. Solucion: **forwarding (adelantamiento)**: tomar el
-resultado directamente de donde ya existe (la salida de la ALU guardada en
-EX/MEM, o el valor de write-back en MEM/WB) y meterlo en la ALU, sin esperar a
-que se escriba en el banco. Lo hace `forwarding_unit.v`.
+Cuando el `sub` llega a EX para restar, el `add` apenas va por MEM: **todavia no
+guardo x3 en el banco de registros**. Si el `sub` leyera el banco, agarraria el
+x3 *viejo* (incorrecto).
 
-### Riesgo load-use
-Caso especial de riesgo de datos: una carga seguida de una instruccion que usa
-el dato cargado.
+**Solucion: forwarding (adelantamiento, tambien "bypass").** La palabra asusta
+pero la idea es simple: el resultado de `x3` **ya existe** un poquito antes de
+guardarse en el banco (esta a la salida de la ALU, viajando en una bandeja). En
+vez de esperar a que se guarde, lo tomamos *de la bandeja directamente* y se lo
+pasamos a la ALU del `sub`. Es un **atajo**: como pasarle el ingrediente
+directo de una mano a otra en vez de guardarlo en la alacena y volver a sacarlo.
+Esto no cuesta ningun ciclo extra. Lo decide el modulo `forwarding_unit.v`.
+
+### B) Riesgo load-use: "el dato viene de memoria y todavia no llego"
+
+Es un caso especial del anterior, pero **peor**, porque el dato viene de la
+memoria de datos:
 
 ```
-lw   x3, 0(x1)     # el dato sale de memoria en MEM
-add  x4, x3, x5    # lo necesita en EX, un ciclo antes de que exista
+lw   x3, 0(x1)     # CARGA x3 desde memoria (el dato sale recien en MEM)
+add  x4, x3, x5    # quiere x3 en EX, un ciclo ANTES de que exista
 ```
 
-Aqui el forwarding **no alcanza**: el dato de la carga solo esta disponible
-despues de la etapa MEM. Hay que **frenar 1 ciclo (stall / burbuja)** la
-instruccion dependiente. Lo detecta `hazard_unit.v`.
+Aqui el atajo (forwarding) **no alcanza**: el dato cargado no existe en ningun
+lado hasta despues de la etapa MEM, y el `add` lo necesita un ciclo antes. No se
+puede adelantar algo que todavia no se calculo.
 
-### Riesgo de control (saltos)
-Cuando hay un salto (`beq`, `jal`, `jalr`), el pipeline ya empezo a buscar las
-instrucciones que venian fisicamente despues, pero si el salto se toma, esas
-instrucciones **no se deben ejecutar**. Hay que **descartarlas (flush)**: se
-convierten en burbujas. En esta CPU el salto se resuelve en la etapa **MEM**, asi
-que se descartan **3** instrucciones jovenes.
+**Solucion: stall (frenar / hacer esperar).** "Stall" = parar, congelar por un
+momento. Frenamos al `add` **un ciclo** (lo hacemos esperar quieto). En ese ciclo
+de espera, el `lw` avanza y termina de traer el dato; al ciclo siguiente el `add`
+arranca y ahora si recibe x3 por forwarding. Costo: **1 ciclo perdido**. Ese
+hueco de espera se llama **burbuja** (ver mas abajo). Lo detecta `hazard_unit.v`.
 
-### Una burbuja
-"Burbuja" = una instruccion vacia (un NOP) que ocupa una etapa pero no hace nada:
-no escribe registros ni memoria. Se crea poniendo el bit `valid` a 0 y todas las
-senales de control con efecto (reg_write, mem_write, ...) a 0.
+### C) Riesgo de control: "salte, pero ya empece a hacer lo que venia despues"
+
+Pasa con los saltos (`beq`, `jal`, `jalr`). El pipeline va siempre un paso
+adelante: mientras decide si un salto se toma, **ya empezo a buscar las
+instrucciones que estaban fisicamente debajo** del salto. Pero si el salto se
+toma, esas instrucciones **no debian ejecutarse** (la ejecucion se fue a otro
+lado).
+
+```
+        beq x1, x1, destino   # este salto SI se toma
+        addi x6, x0, 99       # esta de NO deberia ejecutarse...
+        ...                   # ...pero el pipeline ya la empezo
+destino: addi x7, x0, 7       # aqui es donde hay que seguir
+```
+
+**Solucion: flush (descartar / tirar a la basura).** "Flush" = vaciar, descartar.
+A las instrucciones que se buscaron por error las **convertimos en burbujas**
+(las anulamos para que no escriban nada) y mandamos el PC al destino correcto.
+En esta CPU el salto se decide en la etapa **MEM**, asi que para cuando nos damos
+cuenta ya entraron **3** instrucciones equivocadas: se descartan las 3. Costo:
+3 ciclos perdidos por cada salto tomado.
+
+### Que es exactamente una "burbuja"
+
+Una **burbuja** es una instruccion *vacia*: ocupa un lugar en el pipeline pero no
+hace absolutamente nada (no escribe registros ni memoria). Es el equivalente a un
+**NOP** ("no operation", una instruccion que no hace nada). Tecnicamente se crea
+poniendo el bit `valid` de esa bandeja en 0 y apagando todas las senales de
+control con efecto (`reg_write=0`, `mem_write=0`, ...). Tanto el stall como el
+flush funcionan **metiendo burbujas** en el pipeline.
+
+### Mini-diccionario de esta seccion
+
+- **hazard / riesgo:** situacion que podria dar un resultado incorrecto al tener
+  varias instrucciones a la vez.
+- **forwarding / adelantamiento / bypass:** atajo que pasa un resultado de una
+  bandeja directo a quien lo necesita, sin esperar a guardarlo en el banco.
+- **stall:** frenar (hacer esperar) una instruccion uno o mas ciclos.
+- **flush:** descartar instrucciones que se buscaron por error tras un salto.
+- **burbuja / NOP:** instruccion vacia que no hace nada; el "relleno" que dejan
+  un stall o un flush.
 
 ---
 
