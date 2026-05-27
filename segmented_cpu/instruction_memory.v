@@ -17,8 +17,10 @@ module instruction_memory #(
     parameter HEX_FILE  = "program.hex",
     parameter MEM_DEPTH = 1024
 ) (
-    input  [31:0] addr,   // direccion byte desde el PC
-    output [31:0] instr   // instruccion de 32 bits
+    input  [31:0] addr,         // direccion byte desde el PC
+    output [31:0] instr,        // instruccion de 32 bits (fetch)
+    input  [31:0] debug_addr,   // indice de palabra a mostrar en la VGA
+    output [31:0] debug_instr   // instruccion en debug_addr (lectura combinacional)
 );
 
 reg [31:0] mem [0:MEM_DEPTH-1];
@@ -27,6 +29,7 @@ initial begin
     $readmemh(HEX_FILE, mem);
 end
 
-assign instr = mem[addr[31:2]];
+assign instr       = mem[addr[31:2]];
+assign debug_instr = mem[debug_addr[9:0]];
 
 endmodule
