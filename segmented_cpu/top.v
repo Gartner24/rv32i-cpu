@@ -76,8 +76,8 @@ wire cpu_enable = SW[0] ? (step_pulse && ~halted) : ~halted;
 // =====================================================================
 //  Salidas de los registros de pipeline (manejadas por los modulos pipe_*)
 // =====================================================================
-// IF/ID
-wire [31:0] if_id_pc, if_id_pc_plus_4, if_id_instruction;
+// IF/ID  (la instruccion viene del registro de salida de la ROM, ver IF)
+wire [31:0] if_id_pc, if_id_pc_plus_4;
 wire        if_id_valid;
 // ID/EX
 wire [31:0] id_ex_pc, id_ex_pc_plus_4, id_ex_instruction, id_ex_imm,
@@ -153,6 +153,12 @@ wire stall_effective = load_use_stall & ~flush;
 // no congelar el PC en una instruccion que no se debe ejecutar.
 wire pc_enable = cpu_enable & ~stall_effective & (flush | ~ebreak_in_fetch);
 
+// El registro de salida de la memoria de instrucciones (lectura sincronica M10K)
+// hace de registro de instruccion IF/ID. Avanza con el fetch igual que pipe_ifid
+// (cpu_enable y sin stall); el flush se aplica via el bit valid -> NOP.
+wire        fetch_en = cpu_enable & ~load_use_stall;
+wire [31:0] if_id_instruction = if_id_valid ? if_instruction : NOP_INSTRUCTION;
+
 assign pc_next = flush ? ex_mem_branch_target : if_pc_plus_4;
 
 pc u_pc (
@@ -163,6 +169,7 @@ adder u_pc_plus_4_adder (.a(pc_out), .b(32'd4), .out(if_pc_plus_4));
 // puerto de depuracion de la memoria de instrucciones (columna de programa)
 wire [31:0] vga_instr_debug_addr, vga_instr_debug_data;
 instruction_memory u_instruction_memory (
+    .clk(CLOCK_50), .rst(rst), .read_en(fetch_en),
     .addr(pc_out), .instr(if_instruction),
     .debug_addr(vga_instr_debug_addr), .debug_instr(vga_instr_debug_data)
 );
@@ -316,9 +323,9 @@ data_memory #(.WORDS(DATA_WORDS)) u_data_memory (
 pipe_ifid u_if_id (
     .clk(CLOCK_50), .rst(rst), .enable(cpu_enable),
     .flush(flush), .stall(load_use_stall),
-    .in_pc(pc_out), .in_pc_plus_4(if_pc_plus_4), .in_instruction(if_instruction),
+    .in_pc(pc_out), .in_pc_plus_4(if_pc_plus_4),
     .pc(if_id_pc), .pc_plus_4(if_id_pc_plus_4),
-    .instruction(if_id_instruction), .valid(if_id_valid)
+    .valid(if_id_valid)
 );
 
 pipe_idex u_id_ex (
