@@ -1,58 +1,73 @@
 // =============================================================================
-// vga_debug.v - Vista de depuracion del pipeline de 5 etapas (640x480).
-// Grilla de 80x30 caracteres (fuente 8x16, font128.hex). Completamente
-// combinacional: dada la posicion del pixel (x,y) y el estado de cada etapa,
-// produce el color RGB sin estado interno.
+// vga_debug.v - Vista de depuracion del pipeline de 5 etapas (800x600@72).
+// Grilla de 100x37 caracteres (fuente 8x16, font128.hex). Combinacional.
 //
-// Distribucion de filas:
-//   0      (amarillo): titulo
-//   1-5    (blanco):   una fila por etapa IF/ID/EX/MEM/WB (PC, instruccion, ...)
-//   6      (cyan):     riesgos: STALL / FLUSH / forwarding A,B / HALT
-//   8      (verde):    encabezado REGISTERS
-//   9-16   (blanco):   32 registros en 4 columnas (x0..x31)
-//   18     (verde):    encabezado DATA MEMORY
-//   19-26  (blanco):   32 palabras de memoria en 4 columnas (m0..m31)
+//   IZQUIERDA (col 0-79): etapas con nombres completos, bus de control,
+//     unidad de salto/branch, riesgos, 32 registros, 32 palabras de memoria
+//     (mostradas como 4 bytes little-endian con color por byte).
+//   DERECHA  (col 80-99): el programa como columna; se desplaza alrededor del
+//     PC de fetch, resalta la instruccion actual y etiqueta cada linea con las
+//     etapas que la contienen (F D E M W).
 // =============================================================================
 module vga_debug (
     input         video_on,
-    input  [9:0]  x, y,
+    input  [10:0] x, y,
 
-    // etapas del pipeline
-    input  [31:0] if_pc,   if_instr,
-    input  [31:0] id_pc,   id_instr,
-    input  [31:0] ex_pc,   ex_instr, ex_alu,
-    input  [31:0] mem_instr, mem_alu,
+    // ---- FETCH ----
+    input  [31:0] fetch_pc, fetch_instr, fetch_next_pc,
+    input         fetch_ebreak,
+    // ---- DECODE ----
+    input  [31:0] decode_pc, decode_instr, decode_imm,
+    // ---- EXECUTE ----
+    input  [31:0] exec_instr, exec_alu_a, exec_alu_b, exec_alu_result,
+    input         exec_alu_zero,
+    // ---- MEMORY ----
+    input  [31:0] mem_instr, mem_addr, mem_store_data, mem_read_data,
+    // ---- WRITEBACK ----
     input  [31:0] wb_instr, wb_data,
     input  [4:0]  wb_rd,
-    input         wb_we,
+    input         wb_reg_write,
 
-    // riesgos / forwarding / halt
-    input         stall,
-    input         flush,
-    input  [1:0]  forward_a,
-    input  [1:0]  forward_b,
+    // ---- bus de control (instruccion en EXECUTE / ID-EX) ----
+    input         ctrl_reg_write, ctrl_alu_src, ctrl_alu_a_src, ctrl_alu_a_zero,
+    input         ctrl_mem_read, ctrl_mem_write, ctrl_mem_to_reg,
+    input         ctrl_branch, ctrl_jal, ctrl_jalr,
+    input  [1:0]  ctrl_alu_op,
+    // ---- unidad de salto / branch ----
+    input         branch_condition, branch_taken, pc_src,
+    input  [31:0] branch_target,
+    input  [3:0]  alu_control,
+    // ---- riesgos / forwarding / halt ----
+    input         stall, flush,
+    input  [1:0]  forward_a, forward_b,
+    input         valid_decode, valid_exec, valid_mem, valid_wb,
     input         halted,
 
-    // banco de registros (lectura combinacional por direccion)
+    // ---- PCs de etapa para las etiquetas de la columna de programa ----
+    input  [31:0] exec_pc_tag,    // id_ex_pc
+    input  [31:0] mem_pc4_tag,    // ex_mem_pc_plus_4
+    input  [31:0] wb_pc4_tag,     // mem_wb_pc_plus_4
+
+    // ---- puertos de depuracion ----
     output [4:0]  reg_debug_addr,
     input  [31:0] reg_debug_data,
-    // memoria de datos
     output [4:0]  mem_debug_addr,
     input  [31:0] mem_debug_data,
+    output [31:0] instr_debug_addr,
+    input  [31:0] instr_debug_data,
 
-    output reg [7:0] vga_r,
-    output reg [7:0] vga_g,
-    output reg [7:0] vga_b
+    output reg [7:0] vga_r, vga_g, vga_b
 );
 
     localparam [6:0] SP = 7'h20;
+    localparam [7:0] PCOL = 8'd80;   // primera columna de la zona de programa
 
     reg [7:0] font_rom [0:2047];
     initial $readmemh("font128.hex", font_rom);
 
-    wire [6:0] col       = x[9:3];
+    wire [7:0] col       = x[10:3];
     wire [2:0] glyph_col = x[2:0];
-    wire [4:0] row       = y[8:4];
+    wire [6:0] row       = y[10:4];
     wire [3:0] glyph_row = y[3:0];
 
     // ---------------- funciones auxiliares ----------------
@@ -91,25 +106,25 @@ module vga_debug (
         end
     endfunction
 
-    // digito hex de un valor de 32 bits (8 digitos a partir de la columna base)
+    // 8 digitos hex de un valor de 32 bits a partir de la columna 'base'
     function [6:0] hx;
         input [31:0] val;
-        input [6:0]  base;
-        input [6:0]  c;
+        input [7:0]  base;
+        input [7:0]  c;
         reg   [2:0]  k;
         begin
             hx = SP;
-            if (c >= base && c <= base + 7'd7) begin
+            if (c >= base && c <= base + 8'd7) begin
                 k  = c - base;
                 hx = hn(val[(7 - k) * 4 +: 4]);
             end
         end
     endfunction
 
-    // caracter de una etiqueta de texto colocada en la columna base
+    // caracter de una etiqueta de texto colocada en la columna 'base'
     function [6:0] lbl;
-        input [6:0]   c;
-        input [6:0]   base;
+        input [7:0]   c;
+        input [7:0]   base;
         input [255:0] text;
         input [5:0]   len;
         reg   [5:0]   i;
@@ -122,23 +137,43 @@ module vga_debug (
         end
     endfunction
 
+    // ---------------- zona de programa (columna derecha) ----------
+    localparam [6:0]  PROG_FIRST = 7'd1;
+    localparam [6:0]  PROG_LAST  = 7'd36;
+    localparam [31:0] PROG_K     = 32'd18;   // offset de centrado
+
+    wire [31:0] pc_word        = fetch_pc >> 2;
+    wire [31:0] prog_line      = {25'b0, row} - PROG_FIRST;
+    wire [31:0] base_word      = (pc_word >= PROG_K) ? (pc_word - PROG_K) : 32'd0;
+    wire [31:0] prog_addr_word = base_word + prog_line;
+    wire [31:0] prog_byte_addr = prog_addr_word << 2;
+    assign instr_debug_addr    = prog_addr_word;
+
+    wire tag_f = (prog_addr_word == pc_word);
+    wire tag_d = valid_decode && (prog_addr_word == (decode_pc   >> 2));
+    wire tag_e = valid_exec   && (prog_addr_word == (exec_pc_tag >> 2));
+    wire tag_m = valid_mem    && (prog_addr_word == ((mem_pc4_tag >> 2) - 32'd1));
+    wire tag_w = valid_wb     && (prog_addr_word == ((wb_pc4_tag  >> 2) - 32'd1));
+    wire in_prog = (col >= PCOL) && (row >= PROG_FIRST) && (row <= PROG_LAST);
+
     // ---------------- paneles de registros / memoria (4 columnas) ----------
-    wire        in_reg_rows = (row >= 5'd9)  && (row <= 5'd16);
-    wire        in_mem_rows = (row >= 5'd19) && (row <= 5'd26);
-    wire [4:0]  ridx        = row - 5'd9;
-    wire [4:0]  midx        = row - 5'd19;
-    wire [1:0]  gcol        = (col < 7'd20) ? 2'd0 :
-                              (col < 7'd40) ? 2'd1 :
-                              (col < 7'd60) ? 2'd2 : 2'd3;
-    wire [6:0]  gbase       = gcol * 7'd20;
+    wire        in_reg_rows = (row >= 7'd11) && (row <= 7'd18) && (col < PCOL);
+    wire        in_mem_rows = (row >= 7'd21) && (row <= 7'd28) && (col < PCOL);
+    wire [4:0]  ridx        = row - 7'd11;
+    wire [4:0]  midx        = row - 7'd21;
+    wire [1:0]  gcol        = (col < 8'd20) ? 2'd0 :
+                              (col < 8'd40) ? 2'd1 :
+                              (col < 8'd60) ? 2'd2 : 2'd3;
+    wire [7:0]  gbase       = {6'b0, gcol} * 8'd20;
+    wire [7:0]  moff        = col - gbase;       // offset dentro de la celda mem
 
     assign reg_debug_addr = {gcol, 3'b0} + ridx;
     assign mem_debug_addr = {gcol, 3'b0} + midx;
 
-    // campos decodificados de la instruccion en ID
-    wire [4:0] id_rs1 = id_instr[19:15];
-    wire [4:0] id_rs2 = id_instr[24:20];
-    wire [4:0] id_rd  = id_instr[11:7];
+    // campos decodificados de la instruccion en DECODE
+    wire [4:0] dc_rs1 = decode_instr[19:15];
+    wire [4:0] dc_rs2 = decode_instr[24:20];
+    wire [4:0] dc_rd  = decode_instr[11:7];
 
     // ---------------- caracter de la celda actual ----------
     reg [6:0] ascii;
@@ -148,148 +183,263 @@ module vga_debug (
         ascii = SP;
         t     = SP;
 
-        case (row)
+        if (col >= PCOL) begin
+            // ===================== columna de programa =====================
+            if (row == 7'd0) begin
+                t = lbl(col, PCOL, "===== PROGRAM =====", 6'd19);
+                if (t != SP) ascii = t;
+            end else if (in_prog) begin
+                case (col - PCOL)
+                    8'd0: ascii = tag_f ? "F" : SP;
+                    8'd1: ascii = tag_d ? "D" : SP;
+                    8'd2: ascii = tag_e ? "E" : SP;
+                    8'd3: ascii = tag_m ? "M" : SP;
+                    8'd4: ascii = tag_w ? "W" : SP;
+                    8'd6: ascii = hn(prog_byte_addr[11:8]);
+                    8'd7: ascii = hn(prog_byte_addr[7:4]);
+                    8'd8: ascii = hn(prog_byte_addr[3:0]);
+                    8'd9: ascii = ":";
+                    8'd18: ascii = tag_f ? "<" : SP;
+                    default: begin
+                        t = hx(instr_debug_data, PCOL + 8'd10, col);
+                        if (t != SP) ascii = t;
+                    end
+                endcase
+            end
+        end else begin
+            // ========================= zona izquierda ======================
+            case (row)
 
-        // ---- titulo ----
-        5'd0: begin
-            t = lbl(col, 7'd0, "===== PIPELINE 5 ETAPAS =====", 6'd29);
-            if (t != SP) ascii = t;
-        end
+            // ---- titulo ----
+            7'd0: begin
+                t = lbl(col, 8'd0, "===== PIPELINE 5 ETAPAS =====", 6'd29);
+                if (t != SP) ascii = t;
+            end
 
-        // ---- IF ----
-        5'd1: begin
-            t = lbl(col, 7'd0,  "IF", 6'd2);    if (t != SP) ascii = t;
-            t = lbl(col, 7'd4,  "PC:", 6'd3);   if (t != SP) ascii = t;
-            t = hx(if_pc, 7'd7, col);           if (t != SP) ascii = t;
-            t = lbl(col, 7'd17, "IR:", 6'd3);   if (t != SP) ascii = t;
-            t = hx(if_instr, 7'd20, col);       if (t != SP) ascii = t;
-        end
+            // ---- FETCH ----
+            7'd1: begin
+                t = lbl(col, 8'd0,  "FETCH", 6'd5);      if (t != SP) ascii = t;
+                t = lbl(col, 8'd10, "PC:", 6'd3);        if (t != SP) ascii = t;
+                t = hx(fetch_pc, 8'd13, col);            if (t != SP) ascii = t;
+                t = lbl(col, 8'd23, "INSTR:", 6'd6);     if (t != SP) ascii = t;
+                t = hx(fetch_instr, 8'd29, col);         if (t != SP) ascii = t;
+                t = lbl(col, 8'd39, "nextPC:", 6'd7);    if (t != SP) ascii = t;
+                t = hx(fetch_next_pc, 8'd46, col);       if (t != SP) ascii = t;
+                t = lbl(col, 8'd56, "ebreak:", 6'd7);    if (t != SP) ascii = t;
+                if (col == 8'd63) ascii = bit_ch(fetch_ebreak);
+            end
 
-        // ---- ID ----
-        5'd2: begin
-            t = lbl(col, 7'd0,  "ID", 6'd2);    if (t != SP) ascii = t;
-            t = lbl(col, 7'd4,  "PC:", 6'd3);   if (t != SP) ascii = t;
-            t = hx(id_pc, 7'd7, col);           if (t != SP) ascii = t;
-            t = lbl(col, 7'd17, "IR:", 6'd3);   if (t != SP) ascii = t;
-            t = hx(id_instr, 7'd20, col);       if (t != SP) ascii = t;
-            t = lbl(col, 7'd30, "RS1:", 6'd4);  if (t != SP) ascii = t;
-            if      (col == 7'd34) ascii = dec_tens(id_rs1);
-            else if (col == 7'd35) ascii = dec_ones(id_rs1);
-            t = lbl(col, 7'd38, "RS2:", 6'd4);  if (t != SP) ascii = t;
-            if      (col == 7'd42) ascii = dec_tens(id_rs2);
-            else if (col == 7'd43) ascii = dec_ones(id_rs2);
-            t = lbl(col, 7'd46, "RD:", 6'd3);   if (t != SP) ascii = t;
-            if      (col == 7'd49) ascii = dec_tens(id_rd);
-            else if (col == 7'd50) ascii = dec_ones(id_rd);
-        end
+            // ---- DECODE ----
+            7'd2: begin
+                t = lbl(col, 8'd0,  "DECODE", 6'd6);     if (t != SP) ascii = t;
+                t = lbl(col, 8'd10, "PC:", 6'd3);        if (t != SP) ascii = t;
+                t = hx(decode_pc, 8'd13, col);           if (t != SP) ascii = t;
+                t = lbl(col, 8'd23, "INSTR:", 6'd6);     if (t != SP) ascii = t;
+                t = hx(decode_instr, 8'd29, col);        if (t != SP) ascii = t;
+                t = lbl(col, 8'd39, "rs1:", 6'd4);       if (t != SP) ascii = t;
+                if      (col == 8'd43) ascii = dec_tens(dc_rs1);
+                else if (col == 8'd44) ascii = dec_ones(dc_rs1);
+                t = lbl(col, 8'd47, "rs2:", 6'd4);       if (t != SP) ascii = t;
+                if      (col == 8'd51) ascii = dec_tens(dc_rs2);
+                else if (col == 8'd52) ascii = dec_ones(dc_rs2);
+                t = lbl(col, 8'd55, "rd:", 6'd3);        if (t != SP) ascii = t;
+                if      (col == 8'd58) ascii = dec_tens(dc_rd);
+                else if (col == 8'd59) ascii = dec_ones(dc_rd);
+                t = lbl(col, 8'd62, "imm:", 6'd4);       if (t != SP) ascii = t;
+                t = hx(decode_imm, 8'd66, col);          if (t != SP) ascii = t;
+            end
 
-        // ---- EX ----
-        5'd3: begin
-            t = lbl(col, 7'd0,  "EX", 6'd2);    if (t != SP) ascii = t;
-            t = lbl(col, 7'd4,  "PC:", 6'd3);   if (t != SP) ascii = t;
-            t = hx(ex_pc, 7'd7, col);           if (t != SP) ascii = t;
-            t = lbl(col, 7'd17, "IR:", 6'd3);   if (t != SP) ascii = t;
-            t = hx(ex_instr, 7'd20, col);       if (t != SP) ascii = t;
-            t = lbl(col, 7'd30, "ALU:", 6'd4);  if (t != SP) ascii = t;
-            t = hx(ex_alu, 7'd34, col);         if (t != SP) ascii = t;
-            t = lbl(col, 7'd44, "RD:", 6'd3);   if (t != SP) ascii = t;
-            if      (col == 7'd47) ascii = dec_tens(ex_instr[11:7]);
-            else if (col == 7'd48) ascii = dec_ones(ex_instr[11:7]);
-        end
+            // ---- EXECUTE ----
+            7'd3: begin
+                t = lbl(col, 8'd0,  "EXECUTE", 6'd7);    if (t != SP) ascii = t;
+                t = lbl(col, 8'd10, "INSTR:", 6'd6);     if (t != SP) ascii = t;
+                t = hx(exec_instr, 8'd16, col);          if (t != SP) ascii = t;
+                t = lbl(col, 8'd26, "A:", 6'd2);         if (t != SP) ascii = t;
+                t = hx(exec_alu_a, 8'd28, col);          if (t != SP) ascii = t;
+                t = lbl(col, 8'd38, "B:", 6'd2);         if (t != SP) ascii = t;
+                t = hx(exec_alu_b, 8'd40, col);          if (t != SP) ascii = t;
+                t = lbl(col, 8'd50, "ALU:", 6'd4);       if (t != SP) ascii = t;
+                t = hx(exec_alu_result, 8'd54, col);     if (t != SP) ascii = t;
+                t = lbl(col, 8'd64, "zero:", 6'd5);      if (t != SP) ascii = t;
+                if (col == 8'd69) ascii = bit_ch(exec_alu_zero);
+                t = lbl(col, 8'd72, "rd:", 6'd3);        if (t != SP) ascii = t;
+                if      (col == 8'd75) ascii = dec_tens(exec_instr[11:7]);
+                else if (col == 8'd76) ascii = dec_ones(exec_instr[11:7]);
+            end
 
-        // ---- MEM ----
-        5'd4: begin
-            t = lbl(col, 7'd0,  "MEM", 6'd3);   if (t != SP) ascii = t;
-            t = lbl(col, 7'd4,  "IR:", 6'd3);   if (t != SP) ascii = t;
-            t = hx(mem_instr, 7'd7, col);       if (t != SP) ascii = t;
-            t = lbl(col, 7'd17, "ALU:", 6'd4);  if (t != SP) ascii = t;
-            t = hx(mem_alu, 7'd21, col);        if (t != SP) ascii = t;
-            t = lbl(col, 7'd31, "RD:", 6'd3);   if (t != SP) ascii = t;
-            if      (col == 7'd34) ascii = dec_tens(mem_instr[11:7]);
-            else if (col == 7'd35) ascii = dec_ones(mem_instr[11:7]);
-        end
+            // ---- MEMORY ----
+            7'd4: begin
+                t = lbl(col, 8'd0,  "MEMORY", 6'd6);     if (t != SP) ascii = t;
+                t = lbl(col, 8'd10, "INSTR:", 6'd6);     if (t != SP) ascii = t;
+                t = hx(mem_instr, 8'd16, col);           if (t != SP) ascii = t;
+                t = lbl(col, 8'd26, "addr:", 6'd5);      if (t != SP) ascii = t;
+                t = hx(mem_addr, 8'd31, col);            if (t != SP) ascii = t;
+                t = lbl(col, 8'd41, "wdata:", 6'd6);     if (t != SP) ascii = t;
+                t = hx(mem_store_data, 8'd47, col);      if (t != SP) ascii = t;
+                t = lbl(col, 8'd57, "rdata:", 6'd6);     if (t != SP) ascii = t;
+                t = hx(mem_read_data, 8'd63, col);       if (t != SP) ascii = t;
+                t = lbl(col, 8'd73, "rd:", 6'd3);        if (t != SP) ascii = t;
+                if      (col == 8'd76) ascii = dec_tens(mem_instr[11:7]);
+                else if (col == 8'd77) ascii = dec_ones(mem_instr[11:7]);
+            end
 
-        // ---- WB ----
-        5'd5: begin
-            t = lbl(col, 7'd0,  "WB", 6'd2);    if (t != SP) ascii = t;
-            t = lbl(col, 7'd4,  "IR:", 6'd3);   if (t != SP) ascii = t;
-            t = hx(wb_instr, 7'd7, col);        if (t != SP) ascii = t;
-            t = lbl(col, 7'd17, "WB:", 6'd3);   if (t != SP) ascii = t;
-            t = hx(wb_data, 7'd20, col);        if (t != SP) ascii = t;
-            t = lbl(col, 7'd30, "RD:", 6'd3);   if (t != SP) ascii = t;
-            if      (col == 7'd33) ascii = dec_tens(wb_rd);
-            else if (col == 7'd34) ascii = dec_ones(wb_rd);
-            t = lbl(col, 7'd37, "WE:", 6'd3);   if (t != SP) ascii = t;
-            if      (col == 7'd40) ascii = bit_ch(wb_we);
-        end
+            // ---- WRITEBACK ----
+            7'd5: begin
+                t = lbl(col, 8'd0,  "WRITEBACK", 6'd9);  if (t != SP) ascii = t;
+                t = lbl(col, 8'd10, "INSTR:", 6'd6);     if (t != SP) ascii = t;
+                t = hx(wb_instr, 8'd16, col);            if (t != SP) ascii = t;
+                t = lbl(col, 8'd26, "data:", 6'd5);      if (t != SP) ascii = t;
+                t = hx(wb_data, 8'd31, col);             if (t != SP) ascii = t;
+                t = lbl(col, 8'd41, "rd:", 6'd3);        if (t != SP) ascii = t;
+                if      (col == 8'd44) ascii = dec_tens(wb_rd);
+                else if (col == 8'd45) ascii = dec_ones(wb_rd);
+                t = lbl(col, 8'd48, "RegWrite:", 6'd9);  if (t != SP) ascii = t;
+                if (col == 8'd57) ascii = bit_ch(wb_reg_write);
+            end
 
-        // ---- riesgos / forwarding / halt ----
-        5'd6: begin
-            t = lbl(col, 7'd0,  "STALL:", 6'd6);  if (t != SP) ascii = t;
-            if (col == 7'd6)  ascii = bit_ch(stall);
-            t = lbl(col, 7'd9,  "FLUSH:", 6'd6);  if (t != SP) ascii = t;
-            if (col == 7'd15) ascii = bit_ch(flush);
-            t = lbl(col, 7'd18, "FWDA:", 6'd5);   if (t != SP) ascii = t;
-            if (col == 7'd23) ascii = hn({2'b0, forward_a});
-            t = lbl(col, 7'd26, "FWDB:", 6'd5);   if (t != SP) ascii = t;
-            if (col == 7'd31) ascii = hn({2'b0, forward_b});
-            t = lbl(col, 7'd34, "HALT:", 6'd5);   if (t != SP) ascii = t;
-            if (col == 7'd39) ascii = bit_ch(halted);
-        end
+            // ---- bus de control ----
+            7'd6: begin
+                t = lbl(col, 8'd0,  "CTRL", 6'd4);       if (t != SP) ascii = t;
+                t = lbl(col, 8'd6,  "regW:", 6'd5);      if (t != SP) ascii = t;
+                if (col == 8'd11) ascii = bit_ch(ctrl_reg_write);
+                t = lbl(col, 8'd13, "aluSrc:", 6'd7);    if (t != SP) ascii = t;
+                if (col == 8'd20) ascii = bit_ch(ctrl_alu_src);
+                t = lbl(col, 8'd22, "aSrc:", 6'd5);      if (t != SP) ascii = t;
+                if (col == 8'd27) ascii = bit_ch(ctrl_alu_a_src);
+                t = lbl(col, 8'd29, "aZero:", 6'd6);     if (t != SP) ascii = t;
+                if (col == 8'd35) ascii = bit_ch(ctrl_alu_a_zero);
+                t = lbl(col, 8'd37, "memR:", 6'd5);      if (t != SP) ascii = t;
+                if (col == 8'd42) ascii = bit_ch(ctrl_mem_read);
+                t = lbl(col, 8'd44, "memW:", 6'd5);      if (t != SP) ascii = t;
+                if (col == 8'd49) ascii = bit_ch(ctrl_mem_write);
+                t = lbl(col, 8'd51, "m2reg:", 6'd6);     if (t != SP) ascii = t;
+                if (col == 8'd57) ascii = bit_ch(ctrl_mem_to_reg);
+                t = lbl(col, 8'd59, "br:", 6'd3);        if (t != SP) ascii = t;
+                if (col == 8'd62) ascii = bit_ch(ctrl_branch);
+                t = lbl(col, 8'd64, "jal:", 6'd4);       if (t != SP) ascii = t;
+                if (col == 8'd68) ascii = bit_ch(ctrl_jal);
+                t = lbl(col, 8'd70, "jalr:", 6'd5);      if (t != SP) ascii = t;
+                if (col == 8'd75) ascii = bit_ch(ctrl_jalr);
+            end
 
-        // ---- encabezado registros ----
-        5'd8: begin
-            t = lbl(col, 7'd0, "===== REGISTERS =====", 6'd21);
-            if (t != SP) ascii = t;
-        end
+            // ---- unidad de salto / branch ----
+            7'd7: begin
+                t = lbl(col, 8'd0,  "JUMP", 6'd4);       if (t != SP) ascii = t;
+                t = lbl(col, 8'd6,  "brCond:", 6'd7);    if (t != SP) ascii = t;
+                if (col == 8'd13) ascii = bit_ch(branch_condition);
+                t = lbl(col, 8'd15, "brTaken:", 6'd8);   if (t != SP) ascii = t;
+                if (col == 8'd23) ascii = bit_ch(branch_taken);
+                t = lbl(col, 8'd25, "pcSrc:", 6'd6);     if (t != SP) ascii = t;
+                if (col == 8'd31) ascii = bit_ch(pc_src);
+                t = lbl(col, 8'd33, "target:", 6'd7);    if (t != SP) ascii = t;
+                t = hx(branch_target, 8'd40, col);       if (t != SP) ascii = t;
+                t = lbl(col, 8'd50, "aluOp:", 6'd6);     if (t != SP) ascii = t;
+                if      (col == 8'd56) ascii = bit_ch(ctrl_alu_op[1]);
+                else if (col == 8'd57) ascii = bit_ch(ctrl_alu_op[0]);
+                t = lbl(col, 8'd60, "aluCtrl:", 6'd8);   if (t != SP) ascii = t;
+                if (col == 8'd68) ascii = hn(alu_control);
+            end
 
-        // ---- encabezado memoria ----
-        5'd18: begin
-            t = lbl(col, 7'd0, "===== DATA MEMORY =====", 6'd23);
-            if (t != SP) ascii = t;
-        end
+            // ---- riesgos / forwarding / valid / halt ----
+            7'd8: begin
+                t = lbl(col, 8'd0,  "HAZRD", 6'd5);      if (t != SP) ascii = t;
+                t = lbl(col, 8'd6,  "stall:", 6'd6);     if (t != SP) ascii = t;
+                if (col == 8'd12) ascii = bit_ch(stall);
+                t = lbl(col, 8'd14, "flush:", 6'd6);     if (t != SP) ascii = t;
+                if (col == 8'd20) ascii = bit_ch(flush);
+                t = lbl(col, 8'd22, "fwdA:", 6'd5);      if (t != SP) ascii = t;
+                if (col == 8'd27) ascii = hn({2'b0, forward_a});
+                t = lbl(col, 8'd29, "fwdB:", 6'd5);      if (t != SP) ascii = t;
+                if (col == 8'd34) ascii = hn({2'b0, forward_b});
+                t = lbl(col, 8'd37, "valid", 6'd5);      if (t != SP) ascii = t;
+                t = lbl(col, 8'd43, "D:", 6'd2);         if (t != SP) ascii = t;
+                if (col == 8'd45) ascii = bit_ch(valid_decode);
+                t = lbl(col, 8'd47, "E:", 6'd2);         if (t != SP) ascii = t;
+                if (col == 8'd49) ascii = bit_ch(valid_exec);
+                t = lbl(col, 8'd51, "M:", 6'd2);         if (t != SP) ascii = t;
+                if (col == 8'd53) ascii = bit_ch(valid_mem);
+                t = lbl(col, 8'd55, "W:", 6'd2);         if (t != SP) ascii = t;
+                if (col == 8'd57) ascii = bit_ch(valid_wb);
+                t = lbl(col, 8'd64, "HALT:", 6'd5);      if (t != SP) ascii = t;
+                if (col == 8'd69) ascii = bit_ch(halted);
+            end
 
-        // ---- filas de registros (9-16) y memoria (19-26), 4 columnas ----
-        default: begin
-            if (in_reg_rows) begin
-                if      (col == gbase)        ascii = "x";
-                else if (col == gbase + 7'd1) ascii = dec_tens(reg_debug_addr);
-                else if (col == gbase + 7'd2) ascii = dec_ones(reg_debug_addr);
-                else if (col == gbase + 7'd3) ascii = "=";
-                else begin
-                    t = hx(reg_debug_data, gbase + 7'd4, col);
-                    if (t != SP) ascii = t;
-                end
-            end else if (in_mem_rows) begin
-                if      (col == gbase)        ascii = "m";
-                else if (col == gbase + 7'd1) ascii = dec_tens(mem_debug_addr);
-                else if (col == gbase + 7'd2) ascii = dec_ones(mem_debug_addr);
-                else if (col == gbase + 7'd3) ascii = "=";
-                else begin
-                    t = hx(mem_debug_data, gbase + 7'd4, col);
-                    if (t != SP) ascii = t;
+            // ---- encabezado registros ----
+            7'd10: begin
+                t = lbl(col, 8'd0, "===== REGISTERS =====", 6'd21);
+                if (t != SP) ascii = t;
+            end
+
+            // ---- encabezado memoria ----
+            7'd20: begin
+                t = lbl(col, 8'd0, "===== DATA MEMORY (bytes) =====", 6'd31);
+                if (t != SP) ascii = t;
+            end
+
+            // ---- registros (11-18) y memoria (21-28), 4 columnas ----
+            default: begin
+                if (in_reg_rows) begin
+                    if      (col == gbase)        ascii = "x";
+                    else if (col == gbase + 8'd1) ascii = dec_tens(reg_debug_addr);
+                    else if (col == gbase + 8'd2) ascii = dec_ones(reg_debug_addr);
+                    else if (col == gbase + 8'd3) ascii = "=";
+                    else begin
+                        t = hx(reg_debug_data, gbase + 8'd4, col);
+                        if (t != SP) ascii = t;
+                    end
+                end else if (in_mem_rows) begin
+                    if      (col == gbase)        ascii = "m";
+                    else if (col == gbase + 8'd1) ascii = dec_tens(mem_debug_addr);
+                    else if (col == gbase + 8'd2) ascii = dec_ones(mem_debug_addr);
+                    else if (col == gbase + 8'd3) ascii = "=";
+                    // bytes little-endian: B0=[7:0] B1=[15:8] B2=[23:16] B3=[31:24]
+                    else if (moff == 8'd4)  ascii = hn(mem_debug_data[7:4]);
+                    else if (moff == 8'd5)  ascii = hn(mem_debug_data[3:0]);
+                    else if (moff == 8'd7)  ascii = hn(mem_debug_data[15:12]);
+                    else if (moff == 8'd8)  ascii = hn(mem_debug_data[11:8]);
+                    else if (moff == 8'd10) ascii = hn(mem_debug_data[23:20]);
+                    else if (moff == 8'd11) ascii = hn(mem_debug_data[19:16]);
+                    else if (moff == 8'd13) ascii = hn(mem_debug_data[31:28]);
+                    else if (moff == 8'd14) ascii = hn(mem_debug_data[27:24]);
                 end
             end
-        end
 
-        endcase
+            endcase
+        end
     end
 
     // ---------------- pixel y color ----------------
     wire [7:0] font_byte = font_rom[{ascii[6:0], glyph_row}];
     wire       pixel     = font_byte[7 - glyph_col];
 
+    // color base por region
     reg [7:0] fr, fg, fb;
     always @(*) begin
-        if      (row == 5'd0)                  {fr, fg, fb} = {8'hFF, 8'hFF, 8'h00}; // amarillo
-        else if (row >= 5'd1 && row <= 5'd5)   {fr, fg, fb} = {8'hFF, 8'hFF, 8'hFF}; // blanco
-        else if (row == 5'd6)                  {fr, fg, fb} = {8'h00, 8'hFF, 8'hFF}; // cyan
-        else if (row == 5'd8 || row == 5'd18)  {fr, fg, fb} = {8'h00, 8'hFF, 8'h00}; // verde
-        else                                   {fr, fg, fb} = {8'hFF, 8'hFF, 8'hFF}; // blanco
+        if (col >= PCOL) begin
+            // columna de programa: linea actual en amarillo, etiquetas en cyan,
+            // resto blanco. Encabezado en verde.
+            if (row == 7'd0)            {fr, fg, fb} = {8'h00, 8'hFF, 8'h00};
+            else if (tag_f)             {fr, fg, fb} = {8'hFF, 8'hFF, 8'h00};
+            else if ((col - PCOL) < 8'd5) {fr, fg, fb} = {8'h00, 8'hFF, 8'hFF};
+            else                        {fr, fg, fb} = {8'hFF, 8'hFF, 8'hFF};
+        end else if (row == 7'd0)       {fr, fg, fb} = {8'hFF, 8'hFF, 8'h00}; // amarillo
+        else if (row >= 7'd1 && row <= 7'd5) {fr, fg, fb} = {8'hFF, 8'hFF, 8'hFF};
+        else if (row == 7'd6)           {fr, fg, fb} = {8'h00, 8'hFF, 8'hFF}; // cyan
+        else if (row == 7'd7)           {fr, fg, fb} = {8'hFF, 8'h00, 8'hFF}; // magenta
+        else if (row == 7'd8)           {fr, fg, fb} = {8'h00, 8'hFF, 8'hFF}; // cyan
+        else if (row == 7'd10 || row == 7'd20) {fr, fg, fb} = {8'h00, 8'hFF, 8'h00};
+        else if (in_mem_rows) begin
+            // color por byte: B0 rojo, B1 verde, B2 cyan, B3 amarillo; prefijo blanco
+            if      (moff == 8'd4  || moff == 8'd5)  {fr, fg, fb} = {8'hFF, 8'h40, 8'h40};
+            else if (moff == 8'd7  || moff == 8'd8)  {fr, fg, fb} = {8'h40, 8'hFF, 8'h40};
+            else if (moff == 8'd10 || moff == 8'd11) {fr, fg, fb} = {8'h40, 8'hFF, 8'hFF};
+            else if (moff == 8'd13 || moff == 8'd14) {fr, fg, fb} = {8'hFF, 8'hFF, 8'h40};
+            else                                     {fr, fg, fb} = {8'hFF, 8'hFF, 8'hFF};
+        end else                        {fr, fg, fb} = {8'hFF, 8'hFF, 8'hFF};
     end
 
-    // HALT en rojo cuando esta detenido (fila 6, col 39)
-    wire halt_cell = (row == 5'd6) && (col == 7'd39);
+    // HALT en rojo cuando esta detenido (fila 8, col 69)
+    wire halt_cell = (row == 7'd8) && (col == 8'd69);
     wire [7:0] pr  = (halt_cell && halted) ? 8'hFF : fr;
     wire [7:0] pg  = (halt_cell && halted) ? 8'h00 : fg;
     wire [7:0] pb  = (halt_cell && halted) ? 8'h00 : fb;
