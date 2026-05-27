@@ -144,7 +144,12 @@ pc u_pc (
     .pc_next(pc_next), .pc_out(pc_out)
 );
 adder u_pc_plus_4_adder (.a(pc_out), .b(32'd4), .out(if_pc_plus_4));
-instruction_memory u_instruction_memory (.addr(pc_out), .instr(if_instruction));
+// puerto de depuracion de la memoria de instrucciones (columna de programa)
+wire [31:0] vga_instr_debug_addr, vga_instr_debug_data;
+instruction_memory u_instruction_memory (
+    .addr(pc_out), .instr(if_instruction),
+    .debug_addr(vga_instr_debug_addr), .debug_instr(vga_instr_debug_data)
+);
 
 // =====================================================================
 //  Etapa ID (decode + lectura de registros + inmediato)
@@ -353,8 +358,8 @@ end
 // =====================================================================
 //  VGA: vista por etapas del pipeline
 // =====================================================================
-wire [9:0] vga_x, vga_y;
-wire       vga_video_on;
+wire [10:0] vga_x, vga_y;
+wire        vga_video_on;
 
 vga_controller u_vga_controller (
     .clk_50MHz(CLOCK_50), .reset(rst),
@@ -364,23 +369,45 @@ vga_controller u_vga_controller (
 
 vga_debug u_vga_debug (
     .video_on(vga_video_on), .x(vga_x), .y(vga_y),
-    // IF
-    .if_pc(pc_out),            .if_instr(if_instruction),
-    // ID
-    .id_pc(if_id_pc),          .id_instr(if_id_instruction),
-    // EX
-    .ex_pc(id_ex_pc),          .ex_instr(id_ex_instruction), .ex_alu(alu_result),
-    // MEM
-    .mem_instr(ex_mem_instruction), .mem_alu(ex_mem_alu_result),
-    // WB
+    // FETCH
+    .fetch_pc(pc_out), .fetch_instr(if_instruction),
+    .fetch_next_pc(pc_next), .fetch_ebreak(ebreak_in_fetch),
+    // DECODE
+    .decode_pc(if_id_pc), .decode_instr(if_id_instruction), .decode_imm(imm),
+    // EXECUTE
+    .exec_instr(id_ex_instruction), .exec_alu_a(alu_operand_a),
+    .exec_alu_b(alu_operand_b), .exec_alu_result(alu_result),
+    .exec_alu_zero(alu_zero),
+    // MEMORY
+    .mem_instr(ex_mem_instruction), .mem_addr(ex_mem_alu_result),
+    .mem_store_data(ex_mem_store_data), .mem_read_data(mem_read_data),
+    // WRITEBACK
     .wb_instr(mem_wb_instruction), .wb_data(write_back_data),
-    .wb_rd(write_back_rd), .wb_we(write_back_enable),
-    // riesgos / forwarding / halt
+    .wb_rd(write_back_rd), .wb_reg_write(write_back_enable),
+    // bus de control (instruccion en EXECUTE / ID-EX)
+    .ctrl_reg_write(id_ex_ctrl_reg_write), .ctrl_alu_src(id_ex_ctrl_alu_src),
+    .ctrl_alu_a_src(id_ex_ctrl_alu_a_src), .ctrl_alu_a_zero(id_ex_ctrl_alu_a_zero),
+    .ctrl_mem_read(id_ex_ctrl_mem_read), .ctrl_mem_write(id_ex_ctrl_mem_write),
+    .ctrl_mem_to_reg(id_ex_ctrl_mem_to_reg), .ctrl_branch(id_ex_ctrl_branch),
+    .ctrl_jal(id_ex_ctrl_jal), .ctrl_jalr(id_ex_ctrl_jalr),
+    .ctrl_alu_op(id_ex_ctrl_alu_op),
+    // unidad de salto / branch (instruccion en EXECUTE)
+    .branch_condition(branch_condition), .branch_taken(branch_taken),
+    .pc_src(pc_src_ex), .branch_target(branch_target_ex),
+    .alu_control(alu_control),
+    // riesgos / forwarding / valid / halt
     .stall(load_use_stall), .flush(flush),
-    .forward_a(forward_a), .forward_b(forward_b), .halted(halted),
-    // depuracion de registros y memoria
+    .forward_a(forward_a), .forward_b(forward_b),
+    .valid_decode(if_id_valid), .valid_exec(id_ex_valid),
+    .valid_mem(ex_mem_valid), .valid_wb(mem_wb_valid),
+    .halted(halted),
+    // PCs de etapa para etiquetas de la columna de programa
+    .exec_pc_tag(id_ex_pc), .mem_pc4_tag(ex_mem_pc_plus_4),
+    .wb_pc4_tag(mem_wb_pc_plus_4),
+    // depuracion de registros / memoria / instrucciones
     .reg_debug_addr(vga_reg_debug_addr), .reg_debug_data(vga_reg_debug_data),
     .mem_debug_addr(vga_mem_debug_addr), .mem_debug_data(vga_mem_debug_data),
+    .instr_debug_addr(vga_instr_debug_addr), .instr_debug_data(vga_instr_debug_data),
     .vga_r(VGA_R), .vga_g(VGA_G), .vga_b(VGA_B)
 );
 
