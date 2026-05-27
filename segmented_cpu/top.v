@@ -95,9 +95,11 @@ wire        ex_mem_valid, ex_mem_pc_src;
 wire        ex_mem_ctrl_reg_write, ex_mem_ctrl_mem_write, ex_mem_ctrl_mem_read,
             ex_mem_ctrl_mem_to_reg, ex_mem_ctrl_jal, ex_mem_ctrl_jalr;
 // MEM/WB
-wire [31:0] mem_wb_alu_result, mem_wb_mem_read_data, mem_wb_pc_plus_4,
-            mem_wb_instruction;
+wire [31:0] mem_wb_alu_result, mem_wb_pc_plus_4, mem_wb_instruction;
 wire        mem_wb_valid;
+// Salida REGISTRADA de la RAM de datos (lectura sincronica M10K). La RAM ya
+// retarda el dato un ciclo, asi que llega en WB sin pasar por el latch MEM/WB.
+wire [31:0] mem_read_data;
 wire        mem_wb_ctrl_reg_write, mem_wb_ctrl_mem_to_reg, mem_wb_ctrl_jal,
             mem_wb_ctrl_jalr;
 
@@ -108,8 +110,8 @@ wire [4:0]  write_back_rd        = mem_wb_instruction[11:7];
 // Carga sub-palabra (lb/lh/lbu/lhu/lw) segun funct3 + addr[1:0] (ambos ya en MEM/WB).
 wire [2:0]  wb_funct3 = mem_wb_instruction[14:12];
 wire [4:0]  wb_sh     = {mem_wb_alu_result[1:0], 3'b0};   // 8 * offset de byte
-wire [7:0]  wb_byte   = mem_wb_mem_read_data >> wb_sh;
-wire [15:0] wb_half   = mem_wb_mem_read_data >> wb_sh;
+wire [7:0]  wb_byte   = mem_read_data >> wb_sh;
+wire [15:0] wb_half   = mem_read_data >> wb_sh;
 reg  [31:0] wb_load;
 always @(*) begin
     case (wb_funct3)
@@ -117,7 +119,7 @@ always @(*) begin
         3'b001:  wb_load = {{16{wb_half[15]}}, wb_half};   // lh
         3'b100:  wb_load = {24'b0, wb_byte};               // lbu
         3'b101:  wb_load = {16'b0, wb_half};               // lhu
-        default: wb_load = mem_wb_mem_read_data;           // lw
+        default: wb_load = mem_read_data;                  // lw
     endcase
 end
 wire [31:0] write_back_value_pre = mem_wb_ctrl_mem_to_reg ? wb_load
@@ -281,8 +283,6 @@ wire [31:0] store_data_ex = rs2_forwarded;
 // =====================================================================
 //  Etapa MEM
 // =====================================================================
-wire [31:0] mem_read_data;
-
 // Store sub-palabra (sb/sh/sw): byte-enables + dato alineado al carril destino.
 // El shift coloca el dato; byte_we enmascara los carriles no escritos.
 wire [2:0]  dm_funct3 = ex_mem_instruction[14:12];
@@ -300,6 +300,7 @@ end
 
 data_memory #(.WORDS(DATA_WORDS)) u_data_memory (
     .clk(CLOCK_50),
+    .read_en(cpu_enable),
     .mem_read(ex_mem_ctrl_mem_read),
     .byte_we(dm_store ? dm_be : 4'b0),
     .addr(ex_mem_alu_result),
@@ -364,11 +365,11 @@ pipe_exmem u_ex_mem (
 pipe_memwb u_mem_wb (
     .clk(CLOCK_50), .rst(rst), .enable(cpu_enable),
     .in_valid(ex_mem_valid),
-    .in_alu_result(ex_mem_alu_result), .in_mem_read_data(mem_read_data),
+    .in_alu_result(ex_mem_alu_result),
     .in_pc_plus_4(ex_mem_pc_plus_4), .in_instruction(ex_mem_instruction),
     .in_ctrl_reg_write(ex_mem_ctrl_reg_write), .in_ctrl_mem_to_reg(ex_mem_ctrl_mem_to_reg),
     .in_ctrl_jal(ex_mem_ctrl_jal), .in_ctrl_jalr(ex_mem_ctrl_jalr),
-    .alu_result(mem_wb_alu_result), .mem_read_data(mem_wb_mem_read_data),
+    .alu_result(mem_wb_alu_result),
     .pc_plus_4(mem_wb_pc_plus_4), .instruction(mem_wb_instruction),
     .valid(mem_wb_valid),
     .ctrl_reg_write(mem_wb_ctrl_reg_write), .ctrl_mem_to_reg(mem_wb_ctrl_mem_to_reg),

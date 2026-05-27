@@ -1,8 +1,9 @@
 // =============================================================================
 // pipe_memwb.v - Registro de pipeline MEM/WB.
-// Captura el resultado de la ALU, el dato leido de memoria, PC+4, la
-// instruccion y las senales de control de write-back. Avanza siempre
-// (cpu_enable); no recibe flush (la instruccion en MEM ya esta confirmada).
+// Captura el resultado de la ALU, PC+4, la instruccion y las senales de control
+// de write-back. El dato de carga NO se latchea aqui: la RAM de datos tiene
+// lectura sincronica (M10K), su propio registro ya lo entrega en WB. Avanza
+// siempre (cpu_enable); no recibe flush (la instruccion en MEM ya esta firme).
 // =============================================================================
 module pipe_memwb (
     input             clk,
@@ -10,7 +11,6 @@ module pipe_memwb (
     input             enable,
     input             in_valid,
     input      [31:0] in_alu_result,
-    input      [31:0] in_mem_read_data,
     input      [31:0] in_pc_plus_4,
     input      [31:0] in_instruction,
     input             in_ctrl_reg_write,
@@ -18,7 +18,6 @@ module pipe_memwb (
     input             in_ctrl_jal,
     input             in_ctrl_jalr,
     output reg [31:0] alu_result,
-    output reg [31:0] mem_read_data,
     output reg [31:0] pc_plus_4,
     output reg [31:0] instruction,
     output reg        valid,
@@ -33,7 +32,7 @@ always @(posedge clk or posedge rst) begin
     if (rst) begin
         valid <= 1'b0; instruction <= NOP_INSTRUCTION; ctrl_reg_write <= 1'b0;
     end else if (enable) begin
-        alu_result <= in_alu_result; mem_read_data <= in_mem_read_data;
+        alu_result <= in_alu_result;
         pc_plus_4 <= in_pc_plus_4; instruction <= in_instruction; valid <= in_valid;
         ctrl_reg_write <= in_ctrl_reg_write; ctrl_mem_to_reg <= in_ctrl_mem_to_reg;
         ctrl_jal <= in_ctrl_jal; ctrl_jalr <= in_ctrl_jalr;
