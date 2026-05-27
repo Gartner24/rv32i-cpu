@@ -1,21 +1,27 @@
 // =============================================================================
-// data_memory.v - RAM de 256 palabras (1 KB) de la CPU (variables y stack).
-// Bloque autocontenido (como en el diagrama): escritura sincronica en la etapa
-// MEM y lectura combinacional en el mismo ciclo. addr llega en bytes; se usa
-// addr[31:2] como indice de palabra (acceso alineado).
+// data_memory.v - RAM de la CPU (variables y stack). Bloque autocontenido:
+// escritura sincronica en la etapa MEM y lectura combinacional en el mismo
+// ciclo. addr llega en bytes; se usa addr[31:2] como indice de palabra.
+//
+// El tamano se fija con el parametro WORDS (por defecto 256 palabras = 1 KB).
+// debug_addr se dimensiona solo segun WORDS, asi que cambiar WORDS ajusta toda
+// la cadena (memoria, puerto de depuracion y, en top, el navegador de paginas).
+// WORDS debe ser potencia de 2 y multiplo de 32 (una pagina = 32 palabras).
 // =============================================================================
-module data_memory (
+module data_memory #(
+    parameter WORDS = 256
+) (
     input         clk,
     input         mem_write,     // habilita escritura (ya con valido y cpu_enable)
     input         mem_read,
     input  [31:0] addr,
     input  [31:0] write_data,
     output [31:0] read_data,
-    input  [7:0]  debug_addr,    // palabra 0..255 a mostrar en la VGA
+    input  [$clog2(WORDS)-1:0] debug_addr,  // palabra a mostrar en la VGA
     output [31:0] debug_data
 );
 
-reg [31:0] memory [0:255];
+reg [31:0] memory [0:WORDS-1];
 
 always @(posedge clk) begin
     if (mem_write)

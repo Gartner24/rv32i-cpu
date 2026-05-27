@@ -38,6 +38,15 @@ module top #(
 localparam [31:0] NOP_INSTRUCTION    = 32'h00000013; // addi x0,x0,0
 localparam [31:0] EBREAK_INSTRUCTION = 32'h00100073;
 
+// --- Tamano de la RAM de datos: una sola perilla ---
+// Cambiar DATA_WORDS reajusta solo la memoria, el puerto de depuracion, el
+// ancho de mem_page y el numero de paginas. Debe ser potencia de 2 y multiplo
+// de 32 (1 pagina = 32 palabras). Por defecto 256 palabras = 1 KB.
+localparam DATA_WORDS = 256;
+localparam DM_AW      = $clog2(DATA_WORDS);       // bits de direccion de palabra
+localparam DM_PAGES   = DATA_WORDS / 32;          // paginas de 32 palabras
+localparam DM_PW      = $clog2(DM_PAGES);          // bits del indice de pagina
+
 // --- Reset ---
 wire rst = ~KEY[0];
 
@@ -50,12 +59,13 @@ button_pulse #(.DEBOUNCE_LIMIT(DEBOUNCE_LIMIT)) u_key_page_next (
 button_pulse #(.DEBOUNCE_LIMIT(DEBOUNCE_LIMIT)) u_key_page_prev (
     .clk(CLOCK_50), .rst(rst), .btn(KEY[3]), .pulse(page_prev_pulse));
 
-// Pagina de la memoria de datos (0..7, 32 palabras c/u). KEY[2]/+1, KEY[3]/-1.
-reg [2:0] mem_page;
+// Pagina de la memoria de datos (0..DM_PAGES-1, 32 palabras c/u). KEY[2]=+1,
+// KEY[3]=-1, con vuelta explicita en los extremos (sirve para cualquier DM_PAGES).
+reg [DM_PW-1:0] mem_page;
 always @(posedge CLOCK_50 or posedge rst) begin
-    if      (rst)             mem_page <= 3'd0;
-    else if (page_next_pulse) mem_page <= mem_page + 3'd1;
-    else if (page_prev_pulse) mem_page <= mem_page - 3'd1;
+    if      (rst)             mem_page <= 0;
+    else if (page_next_pulse) mem_page <= (mem_page == DM_PAGES-1) ? 0 : mem_page + 1'b1;
+    else if (page_prev_pulse) mem_page <= (mem_page == 0) ? DM_PAGES-1 : mem_page - 1'b1;
 end
 
 // --- Halt: se activa cuando un ebreak/instr-nula valido llega a WB ---
@@ -163,7 +173,7 @@ control_unit u_control_unit (
 // direccion de depuracion para la VGA
 wire [4:0]  vga_reg_debug_addr;
 wire [31:0] vga_reg_debug_data;
-wire [7:0]  vga_mem_debug_addr;
+wire [DM_AW-1:0] vga_mem_debug_addr;
 wire [31:0] vga_mem_debug_data;
 
 // El banco de registros tiene su puerto de escritura sincronico (etapa WB) y el
@@ -257,7 +267,7 @@ wire [31:0] store_data_ex = rs2_forwarded;
 //  Etapa MEM
 // =====================================================================
 wire [31:0] mem_read_data;
-data_memory u_data_memory (
+data_memory #(.WORDS(DATA_WORDS)) u_data_memory (
     .clk(CLOCK_50),
     .mem_write(cpu_enable & ex_mem_valid & ex_mem_ctrl_mem_write),
     .mem_read(ex_mem_ctrl_mem_read),
@@ -356,7 +366,7 @@ vga_controller u_vga_controller (
     .clk(VGA_CLK), .x(vga_x), .y(vga_y)
 );
 
-vga_debug u_vga_debug (
+vga_debug #(.DATA_WORDS(DATA_WORDS)) u_vga_debug (
     .video_on(vga_video_on), .x(vga_x), .y(vga_y),
     // FETCH
     .fetch_pc(pc_out), .fetch_instr(if_instruction),
@@ -407,7 +417,8 @@ assign VGA_SYNC_N  = 1'b0;
 
 // --- LEDs ---
 assign LEDR[0]   = SW[0];        // modo paso
-assign LEDR[3:1] = mem_page;     // pagina de memoria de datos visible (0..7)
+wire [2:0] mem_page_led = mem_page;  // 3 bits bajos de la pagina (indicador)
+assign LEDR[3:1] = mem_page_led; // pagina de memoria de datos visible
 assign LEDR[8:4] = 5'b0;
 assign LEDR[9]   = halted;
 

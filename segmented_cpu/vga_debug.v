@@ -9,7 +9,9 @@
 //     PC de fetch, resalta la instruccion actual y etiqueta cada linea con las
 //     etapas que la contienen (F D E M W).
 // =============================================================================
-module vga_debug (
+module vga_debug #(
+    parameter DATA_WORDS = 256                  // tamano de la RAM (potencia de 2, mult. de 32)
+) (
     input         video_on,
     input  [10:0] x, y,
 
@@ -48,13 +50,13 @@ module vga_debug (
     input  [31:0] mem_pc4_tag,    // ex_mem_pc_plus_4
     input  [31:0] wb_pc4_tag,     // mem_wb_pc_plus_4
 
-    // ---- pagina de memoria de datos (KEY[2]=+1, KEY[3]=-1): 8 paginas de 32 ----
-    input  [2:0]  mem_page,
+    // ---- pagina de memoria de datos (KEY[2]=+1, KEY[3]=-1): 32 palabras c/u ----
+    input  [$clog2(DATA_WORDS/32)-1:0] mem_page,
 
     // ---- puertos de depuracion ----
     output [4:0]  reg_debug_addr,
     input  [31:0] reg_debug_data,
-    output [7:0]  mem_debug_addr,
+    output [$clog2(DATA_WORDS)-1:0] mem_debug_addr,
     input  [31:0] mem_debug_data,
     output [31:0] instr_debug_addr,
     input  [31:0] instr_debug_data,
@@ -171,10 +173,12 @@ module vga_debug (
     wire [7:0]  moff        = col - gbase;       // offset dentro de la celda mem
 
     assign reg_debug_addr = {gcol, 3'b0} + ridx;
-    // palabra = pagina*32 + columna*8 + fila; cubre las 256 palabras en 8 paginas
+    // palabra = pagina*32 + columna*8 + fila; cubre toda la RAM en paginas de 32
     assign mem_debug_addr = {mem_page, gcol, 3'b0} + midx;
-    // direccion en bytes de la palabra mostrada (para la etiqueta hex)
-    wire [11:0] mem_byte_addr = {2'b0, mem_debug_addr, 2'b0};
+    // direccion en bytes de la palabra mostrada (etiqueta de 3 digitos hex, <=1KB)
+    wire [11:0] mem_byte_addr = mem_debug_addr << 2;
+    // pagina extendida a 8 bits para mostrarla con 2 digitos hex en el encabezado
+    wire [7:0]  mem_page8 = mem_page;
 
     // campos decodificados de la instruccion en DECODE
     wire [4:0] dc_rs1 = decode_instr[19:15];
@@ -380,7 +384,8 @@ module vga_debug (
             7'd20: begin
                 t = lbl(col, 8'd0, "===== DATA MEMORY (bytes)  pg=", 6'd30);
                 if (t != SP) ascii = t;
-                if (col == 8'd30) ascii = hn({1'b0, mem_page});
+                if      (col == 8'd30) ascii = hn(mem_page8[7:4]);
+                else if (col == 8'd31) ascii = hn(mem_page8[3:0]);
             end
 
             // ---- registros (11-18) y memoria (21-28), 4 columnas ----
