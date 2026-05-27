@@ -102,8 +102,11 @@ test_memory: waves font128.hex program_test_tb.v $(TOP_SRCS)
 test_newfinal: waves font128.hex program_test_tb.v $(TOP_SRCS)
 	$(call run_program,new_final_test)
 
+test_subword: waves font128.hex program_test_tb.v $(TOP_SRCS)
+	$(call run_program,subword_test)
+
 # Corre todos los programas reales y los testbenches de pipeline.
-programs: test_arith test_bits test_loops test_memory test_newfinal \
+programs: test_arith test_bits test_loops test_memory test_newfinal test_subword \
           test_pipe_smoke test_pipe_forward test_pipe_hazard test_pipe_lui
 	@echo ""
 	@echo "--- All program tests complete ---"

@@ -105,7 +105,22 @@ wire        mem_wb_ctrl_reg_write, mem_wb_ctrl_mem_to_reg, mem_wb_ctrl_jal,
 //  Etapa WB (combinacional) - se calcula primero porque alimenta a ID
 // =====================================================================
 wire [4:0]  write_back_rd        = mem_wb_instruction[11:7];
-wire [31:0] write_back_value_pre = mem_wb_ctrl_mem_to_reg ? mem_wb_mem_read_data
+// Carga sub-palabra (lb/lh/lbu/lhu/lw) segun funct3 + addr[1:0] (ambos ya en MEM/WB).
+wire [2:0]  wb_funct3 = mem_wb_instruction[14:12];
+wire [4:0]  wb_sh     = {mem_wb_alu_result[1:0], 3'b0};   // 8 * offset de byte
+wire [7:0]  wb_byte   = mem_wb_mem_read_data >> wb_sh;
+wire [15:0] wb_half   = mem_wb_mem_read_data >> wb_sh;
+reg  [31:0] wb_load;
+always @(*) begin
+    case (wb_funct3)
+        3'b000:  wb_load = {{24{wb_byte[7]}},  wb_byte};   // lb
+        3'b001:  wb_load = {{16{wb_half[15]}}, wb_half};   // lh
+        3'b100:  wb_load = {24'b0, wb_byte};               // lbu
+        3'b101:  wb_load = {16'b0, wb_half};               // lhu
+        default: wb_load = mem_wb_mem_read_data;           // lw
+    endcase
+end
+wire [31:0] write_back_value_pre = mem_wb_ctrl_mem_to_reg ? wb_load
                                                           : mem_wb_alu_result;
 wire [31:0] write_back_data      = (mem_wb_ctrl_jal | mem_wb_ctrl_jalr)
                                    ? mem_wb_pc_plus_4 : write_back_value_pre;
@@ -267,12 +282,28 @@ wire [31:0] store_data_ex = rs2_forwarded;
 //  Etapa MEM
 // =====================================================================
 wire [31:0] mem_read_data;
+
+// Store sub-palabra (sb/sh/sw): byte-enables + dato alineado al carril destino.
+// El shift coloca el dato; byte_we enmascara los carriles no escritos.
+wire [2:0]  dm_funct3 = ex_mem_instruction[14:12];
+wire [1:0]  dm_off    = ex_mem_alu_result[1:0];
+wire        dm_store  = cpu_enable & ex_mem_valid & ex_mem_ctrl_mem_write;
+reg  [3:0]  dm_be;
+reg  [31:0] dm_wdata;
+always @(*) begin
+    case (dm_funct3)
+        3'b000:  begin dm_be = 4'b0001 << dm_off; dm_wdata = ex_mem_store_data << (8*dm_off); end // sb
+        3'b001:  begin dm_be = 4'b0011 << dm_off; dm_wdata = ex_mem_store_data << (8*dm_off); end // sh
+        default: begin dm_be = 4'b1111;           dm_wdata = ex_mem_store_data;               end // sw
+    endcase
+end
+
 data_memory #(.WORDS(DATA_WORDS)) u_data_memory (
     .clk(CLOCK_50),
-    .mem_write(cpu_enable & ex_mem_valid & ex_mem_ctrl_mem_write),
     .mem_read(ex_mem_ctrl_mem_read),
+    .byte_we(dm_store ? dm_be : 4'b0),
     .addr(ex_mem_alu_result),
-    .write_data(ex_mem_store_data),
+    .write_data(dm_wdata),
     .read_data(mem_read_data),
     .debug_addr(vga_mem_debug_addr),
     .debug_data(vga_mem_debug_data)
