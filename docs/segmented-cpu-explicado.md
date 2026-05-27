@@ -310,6 +310,35 @@ flush funcionan **metiendo burbujas** en el pipeline.
 - **burbuja / NOP:** instruccion vacia que no hace nada; el "relleno" que dejan
   un stall o un flush.
 
+## 1.6. Las memorias: por bytes, sub-palabra y RAM de bloque (M10K)
+
+Tres ideas sobre como funcionan la memoria de programa y la de datos. Son
+estandar de RV32I y, ademas, lo que pide aprovechar bien el FPGA.
+
+**Direccionada por bytes (y palabras = 4 bytes).** La memoria se cuenta en
+**bytes**. Una palabra de 32 bits son **4 bytes pegados** (little-endian: el byte
+de menor direccion es el menos significativo). Como cada palabra ocupa 4 bytes,
+la direccion de palabra es `addr` sin sus 2 bits bajos (`addr[1:0]` dice cual de
+los 4 bytes dentro de la palabra). El PC avanza de 4 en 4 por eso mismo.
+
+**Acceso sub-palabra (lb/lh/lw, sb/sh/sw).** RV32I no solo lee/escribe palabras
+enteras: tambien puede una sola **byte** (`b`) o **media palabra** (`h`).
+- Al **leer**: `lb`/`lh` extienden el **signo** (rellenan arriba con el bit mas
+  alto, para numeros negativos); `lbu`/`lhu` extienden con **ceros** (sin signo).
+- Al **escribir**: `sb`/`sh` cambian solo 1 o 2 bytes y dejan el resto intacto;
+  por eso la RAM de datos escribe **por byte** (una habilitacion por cada uno de
+  los 4 carriles). Como columnas de un casillero: pones algo en un cajon sin
+  tocar los otros.
+
+**RAM de bloque (M10K) = lectura sincronica.** El FPGA tiene bloques de memoria
+dedicados (M10K). Para que Quartus los use, la lectura debe ser **registrada**
+(el dato sale en el flanco siguiente, no en el mismo instante). Antes las
+memorias eran de lectura combinacional y se construian con miles de celdas de
+logica; ahora son M10K. El truco para no perder velocidad: ese registro de
+lectura **es** el mismo registro de pipeline que ya existia (la instruccion en
+IF/ID y el dato de carga en MEM/WB), solo que movido adentro de la memoria. Por
+eso no se agrega ningun ciclo extra.
+
 ---
 
 # PARTE II. Los modulos, uno por uno
@@ -399,30 +428,63 @@ module instruction_memory #(
     parameter HEX_FILE  = "program.hex",
     parameter MEM_DEPTH = 1024
 ) (
-    input  [31:0] addr,   // direccion byte desde el PC
-    output [31:0] instr   // instruccion de 32 bits
+    input         clk,
+    input         rst,
+    input         read_en,        // avanza el fetch (= cpu_enable & ~stall)
+    input  [31:0] addr,           // direccion byte desde el PC
+    output [31:0] instr,          // instruccion registrada (llega en ID)
+    input  [31:0] debug_addr,     // indice de palabra para la VGA
+    output [31:0] debug_instr     // instruccion en debug_addr (registrada)
 );
-reg [31:0] mem [0:MEM_DEPTH-1];
-initial begin
-    $readmemh(HEX_FILE, mem);
+localparam [31:0] NOP_INSTRUCTION = 32'h00000013;
+localparam IAW = $clog2(MEM_DEPTH);
+
+(* ramstyle = "M10K" *) reg [31:0] mem [0:MEM_DEPTH-1];
+initial $readmemh(HEX_FILE, mem);
+
+reg [31:0] instr_q;               // registro de salida = registro de instruccion IF/ID
+always @(posedge clk) begin
+    if (rst)          instr_q <= NOP_INSTRUCTION;
+    else if (read_en) instr_q <= mem[addr[IAW+1:2]];
 end
-assign instr = mem[addr[31:2]];
+assign instr = instr_q;
+
+reg [31:0] dbg_q;                 // puerto B, solo lectura, para la VGA
+always @(posedge clk) dbg_q <= mem[debug_addr[IAW-1:0]];
+assign debug_instr = dbg_q;
 endmodule
 ```
 
-Guarda el programa. `mem` es un arreglo de palabras de 32 bits. `$readmemh` lo
-carga desde un archivo `.hex` (una instruccion en hexadecimal por linea) al
-arrancar; Quartus respeta esa inicializacion en la sintesis (la implementa como
-ROM con esos valores constantes).
+Guarda el programa. `mem` es un arreglo de palabras de 32 bits (recuerda: una
+palabra = 4 bytes concatenados). `$readmemh` lo carga desde un `.hex` (una
+instruccion en hexadecimal por linea) al arrancar; Quartus respeta esa
+inicializacion en la sintesis.
 
-Lectura **combinacional**: `assign instr = mem[addr[31:2]]`. La direccion llega
-en bytes, pero como cada instruccion ocupa 4 bytes se usa `addr[31:2]` (se
-descartan los 2 bits bajos) como indice de palabra. Que sea combinacional
-significa que la instruccion sale el mismo ciclo en que el PC presenta la
-direccion (en la etapa IF).
+**Direccionada por bytes:** `addr` llega en bytes, pero como cada instruccion
+ocupa 4 bytes se usa `addr[IAW+1:2]` (se descartan los 2 bits bajos) como indice
+de palabra. `IAW = $clog2(MEM_DEPTH)` es la cantidad de bits de direccion (10
+para 1024 palabras).
 
-Conexion: `addr` <- `pc_out`; `instr` -> se latchea en IF/ID. El parametro
-`HEX_FILE` permite que cada programa de prueba elija su `.hex`.
+**Lectura sincronica (registrada).** Antes era combinacional; ahora la lectura
+pasa por el registro `instr_q`, que se actualiza en el flanco de reloj. Esto se
+hace por dos razones que van juntas:
+- Permite que Quartus implemente la memoria como bloque **M10K** (la RAM de
+  bloque del FPGA *exige* lectura registrada). La etiqueta `(* ramstyle="M10K"
+  *)` se lo pide. Antes, con lectura combinacional, se gastaban miles de celdas
+  de logica.
+- Ese registro de salida `instr_q` **es** el registro de instruccion de IF/ID.
+  No se agrega un ciclo extra: simplemente se mueve el registro que antes estaba
+  en `pipe_ifid` hacia adentro de la memoria. Por eso `pipe_ifid` ya **no**
+  latchea la instruccion (ver 2.13).
+
+`read_en` (= `cpu_enable & ~stall`) hace que el fetch avance igual que
+`pipe_ifid`; `rst` arranca `instr_q` en NOP para no decodificar basura.
+`debug_instr` es un segundo puerto de solo lectura (tambien registrado) para la
+columna de programa de la VGA.
+
+Conexion: `addr` <- `pc_out`; `instr` -> entra a la etapa ID (a traves del
+multiplexor de validez de `top.v`, ver 3.5). El parametro `HEX_FILE` permite que
+cada programa de prueba elija su `.hex`.
 
 ## 2.5. control_unit.v - La unidad de control
 
@@ -651,44 +713,71 @@ Conexion: `a` <- `alu_operand_a`, `b` <- `alu_operand_b` (los operandos despues
 del forwarding y de los muxes), `alu_ctrl` <- de `alu_control`. `result` ->
 se latchea en EX/MEM (y se usa para saltos JALR y para la condicion de branch).
 
-## 2.10. data_memory.v - Memoria de datos
+## 2.10. data_memory.v - Memoria de datos (byte-direccionable, M10K)
 
-Igual que el banco de registros, aqui es un modulo autocontenido con escritura
-sincronica propia (en el monociclo vivia en `top.v`).
+Es la RAM de la CPU (256 palabras = 1 KB) para variables y la pila (stack).
+Tiene dos cosas importantes que la hacen "estandar": guarda **por bytes** y su
+lectura es **sincronica** (para M10K).
 
 ```verilog
-module data_memory (
+module data_memory #(parameter WORDS = 256) (
     input         clk,
-    input         mem_write,     // ya con valido y cpu_enable
+    input         read_en,        // = cpu_enable (congela en paso/halt)
     input         mem_read,
+    input  [3:0]  byte_we,        // habilitacion por byte (sb/sh/sw)
     input  [31:0] addr,
-    input  [31:0] write_data,
+    input  [31:0] write_data,     // dato ya alineado al carril destino
     output [31:0] read_data,
-    input  [4:0]  debug_addr,    // palabra 0..31 a mostrar en la VGA
+    input  [$clog2(WORDS)-1:0] debug_addr,
     output [31:0] debug_data
 );
-reg [31:0] memory [0:255];
+localparam AW = $clog2(WORDS);
+wire [AW-1:0] w = addr[AW+1:2];
 
-always @(posedge clk) begin
-    if (mem_write)
-        memory[addr[31:2]] <= write_data;
+(* ramstyle = "M10K" *) reg [31:0] memory [0:WORDS-1];
+
+always @(posedge clk) begin                 // escritura POR BYTE (4 carriles)
+    if (byte_we[0]) memory[w][7:0]   <= write_data[7:0];
+    if (byte_we[1]) memory[w][15:8]  <= write_data[15:8];
+    if (byte_we[2]) memory[w][23:16] <= write_data[23:16];
+    if (byte_we[3]) memory[w][31:24] <= write_data[31:24];
 end
 
-assign read_data  = mem_read ? memory[addr[31:2]] : 32'b0;
-assign debug_data = memory[debug_addr];
+reg [31:0] read_q;                          // lectura registrada (llega en WB)
+always @(posedge clk)
+    if (read_en) read_q <= mem_read ? memory[w] : 32'b0;
+assign read_data = read_q;
+
+reg [31:0] debug_q;                         // puerto B para la VGA (registrado)
+always @(posedge clk) debug_q <= memory[debug_addr];
+assign debug_data = debug_q;
 endmodule
 ```
 
-Es la RAM de la CPU (256 palabras = 1 KB) para variables y la pila (stack). La
-**escritura es sincronica** (en el flanco, si `mem_write=1`) y la **lectura es
-combinacional** (si `mem_read=1`, sale el dato; si no, 0). `addr[31:2]` es el
-indice de palabra (igual que en la memoria de instrucciones).
+**Guarda por bytes (4 carriles).** Cada palabra son 4 bytes. La entrada
+`byte_we` de 4 bits dice cuales bytes escribir: para un `sw` se ponen los 4
+(`1111`), para un `sh` 2, para un `sb` 1. Asi una escritura de 1 byte NO pisa los
+otros 3 bytes de la palabra. El alineamiento (poner el dato en el carril
+correcto) y el calculo de `byte_we` se hacen en `top.v` (ver 3.8) a partir de
+`funct3` y `addr[1:0]`. La seleccion/extension al leer (lb/lh/lbu/lhu) tambien se
+hace en `top.v`, en WB (ver 3.4).
 
-Conexion (todo en la etapa MEM): `addr` <- `ex_mem_alu_result` (la ALU calculo
-la direccion = base + offset), `write_data` <- `ex_mem_store_data` (el valor a
-guardar, con forwarding aplicado), `mem_write` <- `cpu_enable & ex_mem_valid &
-ex_mem_ctrl_mem_write` (no escribe si la etapa es una burbuja), `read_data` ->
-se latchea en MEM/WB.
+**Lectura sincronica (registrada), igual que la memoria de instrucciones.** El
+dato sale por el registro `read_q` un ciclo despues. Esto:
+- permite el bloque **M10K** (`ramstyle="M10K"`); antes, con lectura
+  combinacional, la RAM se hacia con miles de celdas de logica;
+- NO agrega latencia: antes el dato de carga se latcheaba en el registro MEM/WB;
+  ahora lo latchea la propia RAM, asi que llega a WB en el mismo momento. Por eso
+  `pipe_memwb` ya no lleva el campo del dato leido (ver 2.13).
+
+`read_en` (= `cpu_enable`) congela el registro de lectura en modo paso/halt para
+que WB siga viendo el dato correcto. `addr[AW+1:2]` es el indice de palabra
+(`addr[1:0]` selecciona el byte). El tamano se fija con `WORDS` (una sola
+perilla; potencia de 2 multiplo de 32).
+
+Conexion (etapa MEM): `addr` <- `ex_mem_alu_result`, `write_data` <- dato de
+store ya alineado, `byte_we` <- mascara calculada en `top.v` (0 si la etapa es
+burbuja o no es store), `read_data` -> va directo a la logica de carga de WB.
 
 ## 2.11. forwarding_unit.v - Adelantamiento de datos
 
@@ -768,31 +857,33 @@ ante una orden de burbuja, ponen `valid<=0` y las senales de control a 0.
 ```verilog
 module pipe_ifid (
     input clk, rst, enable, flush, stall,
-    input [31:0] in_pc, in_pc_plus_4, in_instruction,
-    output reg [31:0] pc, pc_plus_4, instruction,
+    input [31:0] in_pc, in_pc_plus_4,
+    output reg [31:0] pc, pc_plus_4,
     output reg valid
 );
-localparam [31:0] NOP_INSTRUCTION = 32'h00000013;
 always @(posedge clk or posedge rst) begin
     if (rst) begin
-        pc <= 0; pc_plus_4 <= 0; instruction <= NOP_INSTRUCTION; valid <= 0;
+        pc <= 0; pc_plus_4 <= 0; valid <= 0;
     end else if (enable) begin
         if (flush) begin
-            instruction <= NOP_INSTRUCTION; valid <= 0;   // burbuja
+            valid <= 0;                       // burbuja
         end else if (stall) begin
             // mantener (la instruccion espera en ID)
         end else begin
-            pc <= in_pc; pc_plus_4 <= in_pc_plus_4;
-            instruction <= in_instruction; valid <= 1;
+            pc <= in_pc; pc_plus_4 <= in_pc_plus_4; valid <= 1;
         end
     end
 end
 endmodule
 ```
 
-Guarda lo que produce IF (PC, PC+4, instruccion). Su control tiene prioridades:
-`flush` (salto tomado) -> burbuja; `stall` (load-use) -> congelar; si no ->
-capturar la instruccion nueva.
+Guarda PC, PC+4 y `valid`. **Ya no guarda la instruccion**: como la memoria de
+instrucciones ahora tiene lectura registrada (M10K, ver 2.4), su registro de
+salida `instr_q` hace de registro de instruccion IF/ID. `top.v` arma la
+instruccion de ID asi: `if_id_instruction = valid ? instr_q : NOP`. Por eso aqui
+el `flush` solo necesita poner `valid<=0` (el multiplexor de afuera la convierte
+en NOP). Su control tiene prioridades: `flush` (salto tomado) -> burbuja;
+`stall` (load-use) -> congelar; si no -> capturar PC nuevo.
 
 ### pipe_idex.v (entre ID y EX)
 Guarda PC, PC+4, instruccion, inmediato, los dos datos leidos (`rs1_data`,
@@ -808,9 +899,11 @@ ademas la **decision y el destino de salto** calculados en EX (`pc_src` y
 descarta.
 
 ### pipe_memwb.v (entre MEM y WB)
-Guarda `alu_result`, el dato leido de memoria (`mem_read_data`), PC+4, la
-instruccion y las `ctrl_*` de write-back. **Avanza siempre** (no recibe flush):
-la instruccion que esta en MEM ya esta confirmada y va a escribir su resultado.
+Guarda `alu_result`, PC+4, la instruccion y las `ctrl_*` de write-back. **Avanza
+siempre** (no recibe flush): la instruccion que esta en MEM ya esta confirmada y
+va a escribir su resultado. **Ya no guarda el dato leido de memoria**: la RAM de
+datos tiene lectura registrada (M10K, ver 2.10), asi que su propio registro
+entrega el dato en WB; `top.v` lo toma directo de la salida de la RAM.
 
 Por que las burbujas ponen las senales de control a 0 y no solo `valid`: la
 `forwarding_unit` mira `ex_mem_ctrl_reg_write` y `mem_wb_ctrl_reg_write`
@@ -845,7 +938,7 @@ y los conecta con cables (`wire`). Es el diagrama hecho codigo. Aqui se ve como
 las salidas de un modulo se vuelven entradas de otro y como las cosas fluyen de
 etapa en etapa. Los numeros de linea son del archivo actual.
 
-## 3.1. Puertos y controles fisicos (lineas 23-37)
+## 3.1. Puertos y controles fisicos (lineas 23-43)
 
 ```verilog
 module top #(parameter DEBOUNCE_LIMIT = 50000) (
@@ -863,7 +956,7 @@ Estos son los pines reales de la DE1-SoC. `CLOCK_50` es el reloj de 50 MHz;
 paso; `LEDR` y `VGA_*` son salidas. (Las asignaciones de pin estan en
 `segmented.qsf`; este modulo no debe cambiar de puertos para no romperlas.)
 
-## 3.2. Reset, anti-rebote y clock-enable global (lineas 40-75)
+## 3.2. Reset, anti-rebote y clock-enable global (lineas 40-90)
 
 ```verilog
 wire rst = ~KEY[0];                    // el boton da 0 al presionar
@@ -878,7 +971,7 @@ paso) solo avanza un tick por cada pulsacion de KEY[1] (`step_pulse`); si
 como `enable` a los 4 registros de pipeline y como condicion de las escrituras a
 registros y memoria: cuando es 0, **todo el pipeline se congela**.
 
-## 3.3. Cables de los registros de pipeline (lineas 81-101)
+## 3.3. Cables de los registros de pipeline (lineas 79-103)
 
 Aqui se declaran los `wire` que llevan las salidas de cada registro de pipeline,
 agrupados por etapa con prefijos completos: `if_id_*`, `id_ex_*`, `ex_mem_*`,
@@ -886,14 +979,31 @@ agrupados por etapa con prefijos completos: `if_id_*`, `id_ex_*`, `ex_mem_*`,
 `mem_wb_ctrl_reg_write`. Solo verlos da el mapa de que informacion viaja en cada
 etapa.
 
-## 3.4. Etapa WB (lineas 107-112)
+## 3.4. Etapa WB (lineas 107-130)
 
 Se calcula primero en el archivo porque su resultado realimenta a ID (la
-escritura del banco):
+escritura del banco). Aqui esta la **seleccion y extension de cargas sub-palabra**
+(lb/lh/lbu/lhu/lw):
 
 ```verilog
-wire [4:0]  write_back_rd        = mem_wb_instruction[11:7];
-wire [31:0] write_back_value_pre = mem_wb_ctrl_mem_to_reg ? mem_wb_mem_read_data
+wire [4:0]  write_back_rd = mem_wb_instruction[11:7];
+
+wire [2:0]  wb_funct3 = mem_wb_instruction[14:12];   // tipo/tamano de carga
+wire [4:0]  wb_sh     = {mem_wb_alu_result[1:0], 3'b0}; // 8 * offset de byte
+wire [7:0]  wb_byte   = mem_read_data >> wb_sh;       // byte seleccionado
+wire [15:0] wb_half   = mem_read_data >> wb_sh;       // media palabra seleccionada
+reg  [31:0] wb_load;
+always @(*) begin
+    case (wb_funct3)
+        3'b000:  wb_load = {{24{wb_byte[7]}},  wb_byte};  // lb  (con signo)
+        3'b001:  wb_load = {{16{wb_half[15]}}, wb_half};  // lh  (con signo)
+        3'b100:  wb_load = {24'b0, wb_byte};              // lbu (sin signo)
+        3'b101:  wb_load = {16'b0, wb_half};              // lhu (sin signo)
+        default: wb_load = mem_read_data;                 // lw
+    endcase
+end
+
+wire [31:0] write_back_value_pre = mem_wb_ctrl_mem_to_reg ? wb_load
                                                           : mem_wb_alu_result;
 wire [31:0] write_back_data      = (mem_wb_ctrl_jal | mem_wb_ctrl_jalr)
                                    ? mem_wb_pc_plus_4 : write_back_value_pre;
@@ -901,16 +1011,19 @@ wire        write_back_enable    = mem_wb_valid & mem_wb_ctrl_reg_write
                                    & (write_back_rd != 5'b0);
 ```
 
-- `write_back_rd`: el registro destino (campo rd de la instruccion en MEM/WB).
-- `write_back_value_pre`: primer mux: dato de memoria (loads) o resultado de ALU.
-- `write_back_data`: segundo mux: si es JAL/JALR escribe `PC+4` (la direccion de
-  retorno); si no, lo anterior.
+- **Carga sub-palabra:** `mem_read_data` es la palabra completa que entrego la
+  RAM. Con `addr[1:0]` (offset del byte) se corre la palabra para traer el byte o
+  la media palabra al fondo, y segun `funct3` se extiende con signo (lb/lh) o con
+  ceros (lbu/lhu). Para `lw` se usa la palabra tal cual. Nota: `mem_read_data`
+  viene **directo de la RAM** (su registro de lectura), no de `pipe_memwb`.
+- `write_back_value_pre`: primer mux: dato de carga (loads) o resultado de ALU.
+- `write_back_data`: segundo mux: si es JAL/JALR escribe `PC+4`; si no, lo anterior.
 - `write_back_enable`: escribe solo si la instruccion es valida, tiene
   `reg_write` y `rd != 0`.
 
-Estos cuatro cables alimentan el puerto de escritura de `register_file`.
+Estos cables alimentan el puerto de escritura de `register_file`.
 
-## 3.5. Etapa IF (lineas 118-146)
+## 3.5. Etapa IF (lineas 133-175)
 
 ```verilog
 wire ebreak_in_fetch = (if_instruction == EBREAK_INSTRUCTION)
@@ -919,29 +1032,43 @@ wire load_use_stall;
 wire flush           = ex_mem_valid & ex_mem_pc_src;
 wire stall_effective = load_use_stall & ~flush;
 wire pc_enable = cpu_enable & ~stall_effective & (flush | ~ebreak_in_fetch);
+
+// La ROM tiene lectura registrada (M10K): su salida es el registro de
+// instruccion IF/ID. Avanza con el fetch; el flush se aplica via valid -> NOP.
+wire        fetch_en = cpu_enable & ~load_use_stall;
+wire [31:0] if_id_instruction = if_id_valid ? if_instruction : NOP_INSTRUCTION;
+
 assign pc_next = flush ? ex_mem_branch_target : if_pc_plus_4;
 
 pc u_pc (.clk(CLOCK_50), .rst(rst), .en(pc_enable),
          .pc_next(pc_next), .pc_out(pc_out));
 adder u_pc_plus_4_adder (.a(pc_out), .b(32'd4), .out(if_pc_plus_4));
-instruction_memory u_instruction_memory (.addr(pc_out), .instr(if_instruction));
+instruction_memory u_instruction_memory (
+    .clk(CLOCK_50), .rst(rst), .read_en(fetch_en),
+    .addr(pc_out), .instr(if_instruction), /* ...puertos VGA... */ );
 ```
 
 Aqui se decide la **direccion siguiente**:
-- `flush` (linea 132): un salto se tomo y se resolvio en MEM (`ex_mem_pc_src`).
-- `pc_next` (linea 139): el mux PCSrc del diagrama -> destino del salto si hay
-  flush, o PC+4 si no.
-- `pc_enable` (linea 137): el PC avanza salvo que haya stall o un `ebreak` recien
-  buscado. **El flush tiene prioridad** sobre el freno por ebreak: si detras del
-  salto se busco especulativamente un ebreak, la redireccion debe ganar para no
-  congelar el PC en una instruccion que no se debe ejecutar. (Este detalle fue un
-  bug real: sin el, la CPU se detenia antes de tiempo.)
-- Las tres instancias: el PC, el sumador de PC+4 y la memoria de instrucciones.
+- `flush`: un salto se tomo y se resolvio en MEM (`ex_mem_pc_src`).
+- `pc_next`: el mux PCSrc del diagrama -> destino del salto si hay flush, o PC+4.
+- `pc_enable`: el PC avanza salvo que haya stall o un `ebreak` recien buscado.
+  **El flush tiene prioridad** sobre el freno por ebreak: si detras del salto se
+  busco especulativamente un ebreak, la redireccion debe ganar para no congelar
+  el PC. (Fue un bug real: sin esto la CPU se detenia antes de tiempo.)
 
-Lo que sale de IF (`pc_out`, `if_pc_plus_4`, `if_instruction`) entra al registro
-IF/ID.
+**Fetch registrado (M10K).** `if_instruction` ya no es combinacional: es la
+salida registrada de la ROM. Esa salida hace de registro de instruccion IF/ID,
+asi que NO se agrega un ciclo (el registro solo se movio de `pipe_ifid` a la
+ROM). `fetch_en = cpu_enable & ~load_use_stall` avanza el fetch igual que
+`pipe_ifid`. El flush se aplica afuera: `if_id_instruction = valid ?
+if_instruction : NOP`, asi una instruccion invalida (burbuja) se ve como NOP en
+ID. `ebreak_in_fetch` ahora se decodifica de la instruccion ya registrada (queda
+un ciclo "atrasado", efecto solo cosmetico en el PC mostrado al detenerse).
 
-## 3.6. Etapa ID (lineas 151-184)
+Lo que entra al registro IF/ID: `pc_out`, `if_pc_plus_4` (a `pipe_ifid`) y la
+instruccion (la salida registrada de la ROM, via el mux de validez).
+
+## 3.6. Etapa ID (lineas 178-216)
 
 ```verilog
 wire [4:0]  rs1 = if_id_instruction[19:15];
@@ -971,7 +1098,7 @@ En ID se decodifica la instruccion que dejo IF/ID:
 
 Todo esto (datos, inmediato, senales de control) entra al registro ID/EX.
 
-## 3.7. Etapa EX (lineas 190-254)
+## 3.7. Etapa EX (lineas 218-289)
 
 Es la etapa mas densa. Primero las dos unidades de control de riesgos:
 
@@ -1052,27 +1179,43 @@ wire [31:0] store_data_ex    = rs2_forwarded;
 
 `pc_src_ex` y `branch_target_ex` se **latchean** en EX/MEM y se usan en MEM.
 
-## 3.8. Etapa MEM (lineas 259-269)
+## 3.8. Etapa MEM (lineas 291-319)
+
+Aqui se prepara el **store sub-palabra** (sb/sh/sw): se calcula la mascara de
+bytes y se alinea el dato al carril correcto antes de entrar a la RAM.
 
 ```verilog
-data_memory u_data_memory (
-    .clk(CLOCK_50),
-    .mem_write(cpu_enable & ex_mem_valid & ex_mem_ctrl_mem_write),
-    .mem_read(ex_mem_ctrl_mem_read),
-    .addr(ex_mem_alu_result),
-    .write_data(ex_mem_store_data),
-    .read_data(mem_read_data), ...);
+wire [2:0] dm_funct3 = ex_mem_instruction[14:12];
+wire [1:0] dm_off    = ex_mem_alu_result[1:0];
+wire       dm_store  = cpu_enable & ex_mem_valid & ex_mem_ctrl_mem_write;
+reg  [3:0]  dm_be;       // habilitacion por byte
+reg  [31:0] dm_wdata;    // dato corrido al carril
+always @(*) begin
+    case (dm_funct3)
+        3'b000:  begin dm_be = 4'b0001 << dm_off; dm_wdata = ex_mem_store_data << (8*dm_off); end // sb
+        3'b001:  begin dm_be = 4'b0011 << dm_off; dm_wdata = ex_mem_store_data << (8*dm_off); end // sh
+        default: begin dm_be = 4'b1111;           dm_wdata = ex_mem_store_data;               end // sw
+    endcase
+end
+
+data_memory #(.WORDS(DATA_WORDS)) u_data_memory (
+    .clk(CLOCK_50), .read_en(cpu_enable), .mem_read(ex_mem_ctrl_mem_read),
+    .byte_we(dm_store ? dm_be : 4'b0),
+    .addr(ex_mem_alu_result), .write_data(dm_wdata),
+    .read_data(mem_read_data), /* ...puertos VGA... */ );
 ```
 
 La memoria de datos accede en MEM. La direccion es `ex_mem_alu_result` (la ALU la
-calculo en EX). La escritura se habilita solo si la etapa es valida y tiene
-`mem_write` (y el `cpu_enable` global). El dato leido `mem_read_data` se latchea
-en MEM/WB.
+calculo en EX). Para un store, `funct3` y `addr[1:0]` deciden cuantos bytes y en
+que carril: el shift coloca el dato y `byte_we` enmascara los carriles que NO se
+escriben (asi un `sb` no pisa el resto de la palabra). `byte_we` es 0 si la etapa
+es burbuja o no es store. El dato leido `mem_read_data` ya viene registrado por la
+propia RAM (lectura sincronica) y va directo a WB.
 
 Tambien es **aqui** donde el salto surte efecto: recordar que en IF
 `flush = ex_mem_valid & ex_mem_pc_src` y `pc_next = flush ? ex_mem_branch_target : ...`.
 
-## 3.9. Las 4 instancias de registros de pipeline (lineas 274-333)
+## 3.9. Las 4 instancias de registros de pipeline (lineas 321-384)
 
 Aqui se conectan los modulos `pipe_*`. Cada uno toma como entradas las salidas de
 su etapa y produce las salidas registradas que usan las etapas siguientes. El
@@ -1095,7 +1238,7 @@ Asi, cuando un salto se toma (flush), se hacen burbujas en IF/ID, ID/EX y EX/MEM
 las **3** instrucciones jovenes detras del salto se descartan, y el PC se
 redirige al destino.
 
-## 3.10. Halt (lineas 336-343)
+## 3.10. Halt (lineas 386-395)
 
 ```verilog
 always @(posedge CLOCK_50 or posedge rst) begin
@@ -1113,7 +1256,7 @@ detiene (`halted<=1`). Que se detenga recien en WB garantiza que todas las
 instrucciones anteriores ya se retiraron y escribieron sus resultados (por
 ejemplo el codigo de salida en x10). `halted` apaga `cpu_enable`, congelando todo.
 
-## 3.11. VGA y LEDs (lineas 351 en adelante)
+## 3.11. VGA y LEDs (lineas 397 en adelante)
 
 Se instancian `vga_controller` y `vga_debug`, pasandole a este ultimo los campos
 de cada etapa (PC, instruccion, ALU) y las senales de riesgo/forwarding para que
