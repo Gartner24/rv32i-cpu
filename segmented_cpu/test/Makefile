@@ -58,7 +58,7 @@ TOP_SRCS := $(SRC)/mux2to1.v $(SRC)/adder.v $(SRC)/alu.v $(SRC)/imm_gen.v \
             $(SRC)/forwarding_unit.v $(SRC)/hazard_unit.v \
             $(SRC)/pipe_ifid.v $(SRC)/pipe_idex.v \
             $(SRC)/pipe_exmem.v $(SRC)/pipe_memwb.v \
-            $(SRC)/vga_debug.v $(SRC)/top.v
+            $(SRC)/vga_debug.v $(SRC)/button_pulse.v $(SRC)/top.v
 
 test_top: waves font128.hex top_tb.v program.hex $(TOP_SRCS)
 	@$(IV) -o waves/top_tb.vvp top_tb.v $(TOP_SRCS) && $(VVP) waves/top_tb.vvp

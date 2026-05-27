@@ -53,6 +53,7 @@ set_global_assignment -name VERILOG_FILE pipe_idex.v
 set_global_assignment -name VERILOG_FILE pipe_exmem.v
 set_global_assignment -name VERILOG_FILE pipe_memwb.v
 set_global_assignment -name VERILOG_FILE vga_debug.v
+set_global_assignment -name VERILOG_FILE button_pulse.v
 set_global_assignment -name VERILOG_FILE top.v
 
 # Memory init files

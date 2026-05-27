@@ -18,6 +18,8 @@
 // Controles fisicos:
 //   KEY[0] : reset (activo en bajo)
 //   KEY[1] : paso manual (un tick de reloj por pulsacion, con anti-rebote)
+//   KEY[2] : memoria de datos -> pagina siguiente (+1, da la vuelta 7->0)
+//   KEY[3] : memoria de datos -> pagina anterior (-1, da la vuelta 0->7)
 //   SW[0]  : 0 = ejecucion libre, 1 = modo paso a paso
 // =============================================================================
 module top #(
@@ -39,35 +41,22 @@ localparam [31:0] EBREAK_INSTRUCTION = 32'h00100073;
 // --- Reset ---
 wire rst = ~KEY[0];
 
-// --- Anti-rebote KEY[1]: genera step_pulse (1 ciclo) por cada pulsacion ---
-reg        key1_sync0, key1_sync1;
-reg [15:0] key1_count;
-reg        key1_stable;
+// --- Pulsadores con anti-rebote: paso manual y navegacion de pagina ---
+wire step_pulse, page_next_pulse, page_prev_pulse;
+button_pulse #(.DEBOUNCE_LIMIT(DEBOUNCE_LIMIT)) u_key_step (
+    .clk(CLOCK_50), .rst(rst), .btn(KEY[1]), .pulse(step_pulse));
+button_pulse #(.DEBOUNCE_LIMIT(DEBOUNCE_LIMIT)) u_key_page_next (
+    .clk(CLOCK_50), .rst(rst), .btn(KEY[2]), .pulse(page_next_pulse));
+button_pulse #(.DEBOUNCE_LIMIT(DEBOUNCE_LIMIT)) u_key_page_prev (
+    .clk(CLOCK_50), .rst(rst), .btn(KEY[3]), .pulse(page_prev_pulse));
+
+// Pagina de la memoria de datos (0..7, 32 palabras c/u). KEY[2]/+1, KEY[3]/-1.
+reg [2:0] mem_page;
 always @(posedge CLOCK_50 or posedge rst) begin
-    if (rst) begin
-        key1_sync0  <= 1'b1;
-        key1_sync1  <= 1'b1;
-        key1_count  <= 16'b0;
-        key1_stable <= 1'b1;
-    end else begin
-        key1_sync0 <= KEY[1];
-        key1_sync1 <= key1_sync0;
-        if (key1_sync1 == key1_stable) begin
-            key1_count <= 16'b0;
-        end else if (key1_count == DEBOUNCE_LIMIT - 1) begin
-            key1_stable <= key1_sync1;
-            key1_count  <= 16'b0;
-        end else begin
-            key1_count <= key1_count + 1'b1;
-        end
-    end
+    if      (rst)             mem_page <= 3'd0;
+    else if (page_next_pulse) mem_page <= mem_page + 3'd1;
+    else if (page_prev_pulse) mem_page <= mem_page - 3'd1;
 end
-reg key1_stable_prev;
-always @(posedge CLOCK_50 or posedge rst) begin
-    if (rst) key1_stable_prev <= 1'b1;
-    else     key1_stable_prev <= key1_stable;
-end
-wire step_pulse = key1_stable_prev & ~key1_stable;
 
 // --- Halt: se activa cuando un ebreak/instr-nula valido llega a WB ---
 reg halted;
@@ -405,8 +394,8 @@ vga_debug u_vga_debug (
     .exec_pc_tag(id_ex_pc), .mem_pc4_tag(ex_mem_pc_plus_4),
     .wb_pc4_tag(mem_wb_pc_plus_4),
     // depuracion de registros / memoria / instrucciones
-    // pagina de memoria de datos seleccionada por SW[3:1] (8 paginas de 32)
-    .mem_page(SW[3:1]),
+    // pagina de memoria de datos (KEY[2]=+1, KEY[3]=-1), 8 paginas de 32
+    .mem_page(mem_page),
     .reg_debug_addr(vga_reg_debug_addr), .reg_debug_data(vga_reg_debug_data),
     .mem_debug_addr(vga_mem_debug_addr), .mem_debug_data(vga_mem_debug_data),
     .instr_debug_addr(vga_instr_debug_addr), .instr_debug_data(vga_instr_debug_data),
@@ -417,8 +406,9 @@ assign VGA_BLANK_N = vga_video_on;
 assign VGA_SYNC_N  = 1'b0;
 
 // --- LEDs ---
-assign LEDR[0]   = SW[0];
-assign LEDR[8:1] = 8'b0;
+assign LEDR[0]   = SW[0];        // modo paso
+assign LEDR[3:1] = mem_page;     // pagina de memoria de datos visible (0..7)
+assign LEDR[8:4] = 5'b0;
 assign LEDR[9]   = halted;
 
 endmodule

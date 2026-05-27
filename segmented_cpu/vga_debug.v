@@ -48,7 +48,7 @@ module vga_debug (
     input  [31:0] mem_pc4_tag,    // ex_mem_pc_plus_4
     input  [31:0] wb_pc4_tag,     // mem_wb_pc_plus_4
 
-    // ---- seleccion de pagina de memoria de datos (SW[3:1]): 8 paginas de 32 ----
+    // ---- pagina de memoria de datos (KEY[2]=+1, KEY[3]=-1): 8 paginas de 32 ----
     input  [2:0]  mem_page,
 
     // ---- puertos de depuracion ----
