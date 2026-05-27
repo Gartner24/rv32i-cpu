@@ -11,7 +11,7 @@ module data_memory (
     input  [31:0] addr,
     input  [31:0] write_data,
     output [31:0] read_data,
-    input  [4:0]  debug_addr,    // palabra 0..31 a mostrar en la VGA
+    input  [7:0]  debug_addr,    // palabra 0..255 a mostrar en la VGA
     output [31:0] debug_data
 );
 

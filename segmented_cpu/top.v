@@ -174,7 +174,7 @@ control_unit u_control_unit (
 // direccion de depuracion para la VGA
 wire [4:0]  vga_reg_debug_addr;
 wire [31:0] vga_reg_debug_data;
-wire [4:0]  vga_mem_debug_addr;
+wire [7:0]  vga_mem_debug_addr;
 wire [31:0] vga_mem_debug_data;
 
 // El banco de registros tiene su puerto de escritura sincronico (etapa WB) y el
@@ -405,6 +405,8 @@ vga_debug u_vga_debug (
     .exec_pc_tag(id_ex_pc), .mem_pc4_tag(ex_mem_pc_plus_4),
     .wb_pc4_tag(mem_wb_pc_plus_4),
     // depuracion de registros / memoria / instrucciones
+    // pagina de memoria de datos seleccionada por SW[3:1] (8 paginas de 32)
+    .mem_page(SW[3:1]),
     .reg_debug_addr(vga_reg_debug_addr), .reg_debug_data(vga_reg_debug_data),
     .mem_debug_addr(vga_mem_debug_addr), .mem_debug_data(vga_mem_debug_data),
     .instr_debug_addr(vga_instr_debug_addr), .instr_debug_data(vga_instr_debug_data),

@@ -48,10 +48,13 @@ module vga_debug (
     input  [31:0] mem_pc4_tag,    // ex_mem_pc_plus_4
     input  [31:0] wb_pc4_tag,     // mem_wb_pc_plus_4
 
+    // ---- seleccion de pagina de memoria de datos (SW[3:1]): 8 paginas de 32 ----
+    input  [2:0]  mem_page,
+
     // ---- puertos de depuracion ----
     output [4:0]  reg_debug_addr,
     input  [31:0] reg_debug_data,
-    output [4:0]  mem_debug_addr,
+    output [7:0]  mem_debug_addr,
     input  [31:0] mem_debug_data,
     output [31:0] instr_debug_addr,
     input  [31:0] instr_debug_data,
@@ -168,7 +171,10 @@ module vga_debug (
     wire [7:0]  moff        = col - gbase;       // offset dentro de la celda mem
 
     assign reg_debug_addr = {gcol, 3'b0} + ridx;
-    assign mem_debug_addr = {gcol, 3'b0} + midx;
+    // palabra = pagina*32 + columna*8 + fila; cubre las 256 palabras en 8 paginas
+    assign mem_debug_addr = {mem_page, gcol, 3'b0} + midx;
+    // direccion en bytes de la palabra mostrada (para la etiqueta hex)
+    wire [11:0] mem_byte_addr = {2'b0, mem_debug_addr, 2'b0};
 
     // campos decodificados de la instruccion en DECODE
     wire [4:0] dc_rs1 = decode_instr[19:15];
@@ -370,10 +376,11 @@ module vga_debug (
                 if (t != SP) ascii = t;
             end
 
-            // ---- encabezado memoria ----
+            // ---- encabezado memoria (con pagina SW[3:1]) ----
             7'd20: begin
-                t = lbl(col, 8'd0, "===== DATA MEMORY (bytes) =====", 6'd31);
+                t = lbl(col, 8'd0, "===== DATA MEMORY (bytes)  pg=", 6'd30);
                 if (t != SP) ascii = t;
+                if (col == 8'd30) ascii = hn({1'b0, mem_page});
             end
 
             // ---- registros (11-18) y memoria (21-28), 4 columnas ----
@@ -388,9 +395,10 @@ module vga_debug (
                         if (t != SP) ascii = t;
                     end
                 end else if (in_mem_rows) begin
-                    if      (col == gbase)        ascii = "m";
-                    else if (col == gbase + 8'd1) ascii = dec_tens(mem_debug_addr);
-                    else if (col == gbase + 8'd2) ascii = dec_ones(mem_debug_addr);
+                    // prefijo = direccion en bytes (3 digitos hex) + '='
+                    if      (col == gbase)        ascii = hn(mem_byte_addr[11:8]);
+                    else if (col == gbase + 8'd1) ascii = hn(mem_byte_addr[7:4]);
+                    else if (col == gbase + 8'd2) ascii = hn(mem_byte_addr[3:0]);
                     else if (col == gbase + 8'd3) ascii = "=";
                     // bytes little-endian: B0=[7:0] B1=[15:8] B2=[23:16] B3=[31:24]
                     else if (moff == 8'd4)  ascii = hn(mem_debug_data[7:4]);
