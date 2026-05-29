@@ -42,7 +42,7 @@ localparam [31:0] EBREAK_INSTRUCTION = 32'h00100073;
 // Cambiar DATA_WORDS reajusta solo la memoria, el puerto de depuracion, el
 // ancho de mem_page y el numero de paginas. Debe ser potencia de 2 y multiplo
 // de 32 (1 pagina = 32 palabras). Por defecto 256 palabras = 1 KB.
-localparam DATA_WORDS = 256;
+localparam DATA_WORDS = 1024;
 localparam DM_AW      = $clog2(DATA_WORDS);       // bits de direccion de palabra
 localparam DM_PAGES   = DATA_WORDS / 32;          // paginas de 32 palabras
 localparam DM_PW      = $clog2(DM_PAGES);          // bits del indice de pagina
