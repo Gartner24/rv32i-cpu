@@ -105,5 +105,12 @@ programs: test_arith test_bits test_loops test_memory test_newfinal test_subword
 	@echo ""
 	@echo "--- All program tests complete ---"
 
+# Traza por ciclo de un programa (lo que se ve en la VGA en modo paso).
+#   make trace                                   (each-instruction por defecto)
+#   make trace TRACE_HEX=../../assembler/pipeline-demo.hex
+TRACE_HEX ?= ../../assembler/each-instruction.hex
+trace: waves font128.hex trace_tb.v $(TOP_SRCS)
+	@$(IV) -Ptrace_tb.HEXF='"$(TRACE_HEX)"' -o waves/trace.vvp trace_tb.v $(TOP_SRCS) && $(VVP) waves/trace.vvp
+
 clean:
 	rm -rf waves font128.hex
