@@ -2,7 +2,7 @@ SRC := ..
 IV  := iverilog
 VVP := vvp
 
-UNIT_TESTS := adder mux2to1 alu alu_control control_unit imm_gen pc register_file data_memory hex_display
+UNIT_TESTS := adder alu alu_control control_unit imm_gen pc register_file data_memory
 ALL_TESTS  := $(UNIT_TESTS) top final_test
 
 .PHONY: all $(addprefix test_,$(ALL_TESTS)) clean
@@ -21,9 +21,6 @@ font128.hex:
 
 test_adder: waves adder_tb.v $(SRC)/adder.v
 	@$(IV) -o waves/adder_tb.vvp adder_tb.v $(SRC)/adder.v && $(VVP) waves/adder_tb.vvp
-
-test_mux2to1: waves mux2to1_tb.v $(SRC)/mux2to1.v
-	@$(IV) -o waves/mux2to1_tb.vvp mux2to1_tb.v $(SRC)/mux2to1.v && $(VVP) waves/mux2to1_tb.vvp
 
 test_alu: waves alu_tb.v $(SRC)/alu.v
 	@$(IV) -o waves/alu_tb.vvp alu_tb.v $(SRC)/alu.v && $(VVP) waves/alu_tb.vvp
@@ -46,15 +43,12 @@ test_register_file: waves register_file_tb.v $(SRC)/register_file.v
 test_data_memory: waves data_memory_tb.v $(SRC)/data_memory.v
 	@$(IV) -o waves/data_memory_tb.vvp data_memory_tb.v $(SRC)/data_memory.v && $(VVP) waves/data_memory_tb.vvp
 
-test_hex_display: waves hex_display_tb.v $(SRC)/hex_display.v
-	@$(IV) -o waves/hex_display_tb.vvp hex_display_tb.v $(SRC)/hex_display.v && $(VVP) waves/hex_display_tb.vvp
-
 # ---------- integration tests ----------
 
-TOP_SRCS := $(SRC)/mux2to1.v $(SRC)/adder.v $(SRC)/alu.v $(SRC)/imm_gen.v \
+TOP_SRCS := $(SRC)/adder.v $(SRC)/alu.v $(SRC)/imm_gen.v \
             $(SRC)/register_file.v $(SRC)/alu_control.v $(SRC)/control_unit.v \
             $(SRC)/instruction_memory.v $(SRC)/data_memory.v $(SRC)/pc.v \
-            $(SRC)/hex_display.v $(SRC)/clock_div.v $(SRC)/vga_controller.v \
+            $(SRC)/vga_controller.v \
             $(SRC)/forwarding_unit.v $(SRC)/hazard_unit.v \
             $(SRC)/pipe_ifid.v $(SRC)/pipe_idex.v \
             $(SRC)/pipe_exmem.v $(SRC)/pipe_memwb.v \
