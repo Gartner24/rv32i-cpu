@@ -12,6 +12,7 @@
 module vga_debug #(
     parameter DATA_WORDS = 256                  // tamano de la RAM (potencia de 2, mult. de 32)
 ) (
+    input         clk,            // reloj de pixel (CLOCK_50): registra la etapa de render
     input         video_on,
     input  [10:0] x, y,
 
@@ -421,11 +422,7 @@ module vga_debug #(
         end
     end
 
-    // ---------------- pixel y color ----------------
-    wire [7:0] font_byte = font_rom[{ascii[6:0], glyph_row}];
-    wire       pixel     = font_byte[7 - glyph_col];
-
-    // color base por region
+    // ---------------- color por region (etapa 1, combinacional) ----------------
     reg [7:0] fr, fg, fb;
     always @(*) begin
         if (col >= PCOL) begin
@@ -457,11 +454,32 @@ module vga_debug #(
     wire [7:0] pg  = (halt_cell && halted) ? 8'h00 : fg;
     wire [7:0] pb  = (halt_cell && halted) ? 8'h00 : fb;
 
+    // ---------------- etapa 2: registro de render ----------------
+    // Se registra entre la seleccion del caracter (etapa 1) y la ROM de fuente
+    // (etapa 2). Esto parte la ruta combinacional larga (mux gigante de ascii +
+    // ROM de 2048 entradas) en dos, para cerrar timing a 50 MHz. El contenido
+    // queda 1 pixel a la derecha (imperceptible).
+    reg [6:0] ascii_q;
+    reg [2:0] glyph_col_q;
+    reg [3:0] glyph_row_q;
+    reg [7:0] pr_q, pg_q, pb_q;
+    reg       video_on_q;
+    always @(posedge clk) begin
+        ascii_q     <= ascii;
+        glyph_col_q <= glyph_col;
+        glyph_row_q <= glyph_row;
+        pr_q <= pr; pg_q <= pg; pb_q <= pb;
+        video_on_q  <= video_on;
+    end
+
+    wire [7:0] font_byte = font_rom[{ascii_q, glyph_row_q}];
+    wire       pixel     = font_byte[7 - glyph_col_q];
+
     always @(*) begin
-        if (~video_on)
+        if (~video_on_q)
             {vga_r, vga_g, vga_b} = 24'h0;
         else if (pixel)
-            {vga_r, vga_g, vga_b} = {pr, pg, pb};
+            {vga_r, vga_g, vga_b} = {pr_q, pg_q, pb_q};
         else
             {vga_r, vga_g, vga_b} = 24'h0;
     end

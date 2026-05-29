@@ -406,6 +406,7 @@ vga_controller u_vga_controller (
 );
 
 vga_debug #(.DATA_WORDS(DATA_WORDS)) u_vga_debug (
+    .clk(CLOCK_50),
     .video_on(vga_video_on), .x(vga_x), .y(vga_y),
     // FETCH
     .fetch_pc(pc_out), .fetch_instr(if_instruction),
