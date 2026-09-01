@@ -49,10 +49,12 @@ in C next to the machine code it assembles to.
 
 ## On the board
 
-Both designs drive the DE1-SoC seven-segment displays through `hex_display.v` and a VGA
-debug view through `vga_controller.v` / `vga_debug.v`, so register and memory state is
-visible while a program runs. `clock_div.v` slows the clock enough to watch execution
-step by step. Build with `build.tcl` in either CPU directory (Quartus).
+Both designs render a VGA debug view through `vga_controller.v` / `vga_debug.v`, so
+register and memory state is visible while a program runs. The single-cycle CPU also
+drives the seven-segment displays (`hex_display.v`) and slows the clock with
+`clock_div.v` to make execution watchable; the pipelined CPU steps instead from a
+debounced button (`button_pulse.v`). Build with `build.tcl` in either CPU directory
+(Quartus).
 
 ## Layout
 
