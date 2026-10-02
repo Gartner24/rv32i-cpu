@@ -686,10 +686,11 @@ def main() -> None:
     mif_program    = binary_to_mif(binary_program)
     cleaned        = clean_source_code(source_code, symbol_table)
 
-    # El .mif se escribe junto al .hex (misma ruta, extension .mif).
-    mif_path = hex_path.rsplit(".", 1)[0] + ".mif" if "." in hex_path else hex_path + ".mif"
+    base_path = hex_path.rsplit(".", 1)[0] if "." in hex_path else hex_path
+    mif_path     = base_path + ".mif"
+    cleaned_path = base_path + "-cleaned.asm"
 
-    with open("./program_cleaned.asm", "w", encoding="utf-8") as f:
+    with open(cleaned_path, "w", encoding="utf-8") as f:
         f.write(cleaned)
 
     with open(hex_path, "w", encoding="utf-8") as f:
